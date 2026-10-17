@@ -61,6 +61,13 @@ async function seaTable(env, tableName, method = 'GET', row = null, rowId = '') 
   try { return text ? JSON.parse(text) : {}; } catch (_) { return {}; }
 }
 function assertAdmin(request, env) {
+  const configuredPassword = clean(env.ADMIN_PASSWORD, 300);
+  if (configuredPassword) {
+    const providedPassword = clean(request.headers.get('X-Admin-Password'), 300);
+    if (!providedPassword) throw Object.assign(new Error('请输入商家后台密码'), { status: 401 });
+    if (providedPassword !== configuredPassword) throw Object.assign(new Error('商家后台密码不正确'), { status: 403 });
+    return;
+  }
   const allowed = clean(env.ADMIN_ACCESS_EMAILS, 1000).split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
   const email = clean(request.headers.get('Cf-Access-Authenticated-User-Email'), 200).toLowerCase();
   if (!allowed.length) throw Object.assign(new Error('后台尚未启用访问保护：请设置 ADMIN_ACCESS_EMAILS，并用 Cloudflare Access 保护 /admin.html 与 /api/admin'), { status: 503 });
