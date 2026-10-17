@@ -141,7 +141,7 @@ async function readOrderMenu(env) {
       targets(row).forEach((meal) => { if (groupKind === 'main') menus[meal].mainMeat.add(name); if (groupKind === 'side') menus[meal].sideMeat.add(name); });
     }
   });
-  const hasMenu = Object.values(menus).some((meal) => meal.packages.length || meal.mainMeat.size || meal.sideMeat.size);
+  const hasMenu = Object.values(menus).some((meal) => meal.packages.length && meal.mainMeat.size && meal.sideMeat.size);
   // An empty table should not make every locally displayed order impossible
   // to submit. Normal validation resumes automatically once menu rows exist.
   if (!hasMenu) return null;

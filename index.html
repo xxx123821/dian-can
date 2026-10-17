@@ -562,21 +562,25 @@
       const mealMenus = menu.mealMenus || {};
       const hasPackages = Object.keys(menu.packages || {}).length || Object.values(mealMenus).some((item) => Object.keys(item?.packages || {}).length);
       const hasDishes = (menu.dishes?.mainMeat?.length || menu.dishes?.sideMeat?.length) || Object.values(mealMenus).some((item) => item?.dishes?.mainMeat?.length || item?.dishes?.sideMeat?.length);
-      // Do not replace the working local menu with an empty response. This
-      // keeps ordering usable during a temporary SeaTable/API outage.
-      if (!hasPackages || !hasDishes) throw new Error(menu.menuWarning || '在线菜单暂时为空');
-      CONFIG.packages = menu.packages || {};
-      CONFIG.dishes = menu.dishes || { mainMeat: [], sideMeat: [] };
-      CONFIG.mealMenus = menu.mealMenus || null;
+      // Apply valid remote fields independently. A partially configured menu
+      // must not hide the local dish fallback or prevent contact/schedule
+      // updates from reaching customers.
+      if (hasPackages) CONFIG.packages = menu.packages;
+      if (hasDishes) {
+        CONFIG.dishes = menu.dishes;
+        CONFIG.mealMenus = menu.mealMenus || null;
+      } else {
+        CONFIG.mealMenus = null;
+      }
       if (Object.prototype.hasOwnProperty.call(menu, 'orderDeadline')) CONFIG.orderDeadline = menu.orderDeadline || null;
       if (menu.mealSchedule && typeof menu.mealSchedule === 'object') CONFIG.mealSchedule = menu.mealSchedule;
-      if (menu.contactName) CONFIG.contactName = String(menu.contactName);
-      if (menu.contactPhone) CONFIG.contactPhone = String(menu.contactPhone);
+      if (Object.prototype.hasOwnProperty.call(menu, 'contactName')) CONFIG.contactName = String(menu.contactName || '');
+      if (Object.prototype.hasOwnProperty.call(menu, 'contactPhone')) CONFIG.contactPhone = String(menu.contactPhone || '');
       const packages = activeMenu().packages || CONFIG.packages;
       if (!packages[state.packageKey]) state.packageKey = Object.keys(packages)[0] || '';
       state.main.clear();
       state.side.clear();
-      if (menu.menuWarning) {
+      if (menu.menuWarning || !hasDishes) {
         $('configNotice').textContent = `在线菜单提示：${menu.menuWarning}`;
         $('configNotice').style.display = 'block';
       } else {
