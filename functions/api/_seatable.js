@@ -34,20 +34,29 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   // SeaTable's API-gateway uses the collection endpoint for both appending
   // and updating rows. Updates carry row_id inside an `updates` array; a
   // row-id URL (the older Base API form) returns HTTP 405 on cloud.seatable.cn.
-  const endpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/?${query}`;
+  const collectionEndpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/`;
+  const endpoint = method === 'GET' ? `${collectionEndpoint}?${query}` : collectionEndpoint;
   const requestBody = method === 'POST'
     ? { table_name: table, rows: [row] }
     : method === 'PUT'
       ? { table_name: table, updates: [{ row_id: rowId, row }] }
       : { table_name: table, row };
   let response;
-  try {
-    response = await fetch(endpoint, {
-      method,
+  const send = (url, body, requestMethod = method) => fetch(url, {
+      method: requestMethod,
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: method === 'GET' ? undefined : JSON.stringify(requestBody),
+      body: requestMethod === 'GET' ? undefined : JSON.stringify(body),
       cache: 'no-store'
     });
+  try {
+    response = await send(endpoint, requestBody);
+    // Older SeaTable deployments expose the row-id URL form. Keep a narrow
+    // compatibility retry for those installations while preferring the
+    // current API-gateway format above.
+    if (!response.ok && response.status === 405 && method === 'PUT' && rowId) {
+      const legacyEndpoint = `${collectionEndpoint}${encodeURIComponent(rowId)}/?table_name=${encodeURIComponent(table)}`;
+      response = await send(legacyEndpoint, { table_name: table, row });
+    }
   } catch (_) { throw new Error('已连接 SeaTable 鉴权服务，但无法连接 Base 数据接口'); }
   const text = await response.text();
   if (!response.ok) {
