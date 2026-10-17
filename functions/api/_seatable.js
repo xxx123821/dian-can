@@ -42,13 +42,20 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   const text = await response.text();
   if (!response.ok) {
     let detail = '';
-    try { const data = JSON.parse(text); detail = clean(data.error || data.error_msg || data.message || data.detail, 240); } catch (_) { }
+    try {
+      const data = JSON.parse(text);
+      detail = clean(data.error || data.error_msg || data.message || data.detail || data.msg || data.error_message, 240);
+    } catch (_) { }
+    // SeaTable sometimes returns a plain-text validation message or a JSON
+    // shape not covered above. Keep the response body (never the token) so
+    // the merchant can see which column/value caused a 400.
+    if (!detail && text) detail = clean(text.replace(/\s+/g, ' '), 240);
     if (response.status === 401 || response.status === 403) {
       const tokenDetail = !tokenResponse.ok ? clean(tokenData.error || tokenData.error_msg || tokenData.message || tokenData.detail, 160) : '';
       const exchange = !tokenResponse.ok ? `（API Token 换取 Base Token 也返回 HTTP ${tokenResponse.status}${tokenDetail ? `：${tokenDetail}` : ''}）` : '';
       throw new Error(`SeaTable 拒绝访问表“${table}”（HTTP ${response.status}）。请确认此令牌属于该 Base、UUID 正确、令牌仍有效且有读写权限，表名完全匹配${detail ? `：${detail}` : ''}${exchange}`);
     }
-    throw new Error(detail ? `SeaTable 请求失败：${detail}` : `SeaTable 请求失败（HTTP ${response.status}）`);
+    throw new Error(detail ? `SeaTable 请求失败（HTTP ${response.status}）：${detail}` : `SeaTable 请求失败（HTTP ${response.status}）`);
   }
   try { return text ? JSON.parse(text) : {}; } catch (_) { return {}; }
 }
