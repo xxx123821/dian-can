@@ -20,11 +20,9 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   let tokenData = {};
   try { tokenData = tokenText ? JSON.parse(tokenText) : {}; } catch (_) { }
   if (!tokenResponse.ok) {
-    const detail = clean(tokenData.error || tokenData.message || tokenData.detail, 180);
-    const hint = tokenResponse.status === 401 || tokenResponse.status === 403
-      ? 'SeaTable Base Token 无效或未授权；请在 SeaTable 重新生成有读写权限的 Base API Token，并更新 Cloudflare 的 SEATABLE_BASE_TOKEN'
-      : `SeaTable Token 接口返回 HTTP ${tokenResponse.status}`;
-    throw new Error(detail ? `${hint}（${detail}）` : hint);
+    const detail = clean(tokenData.error || tokenData.error_msg || tokenData.message || tokenData.detail, 240);
+    const hint = `SeaTable 的 Base Token 换取访问令牌请求失败（HTTP ${tokenResponse.status}）`;
+    throw new Error(detail ? `${hint}：${detail}` : hint);
   }
 
   const accessToken = clean(tokenData.access_token, 2000);
@@ -48,7 +46,7 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   const text = await response.text();
   if (!response.ok) {
     let detail = '';
-    try { const data = JSON.parse(text); detail = clean(data.error || data.message || data.detail, 180); } catch (_) { }
+    try { const data = JSON.parse(text); detail = clean(data.error || data.error_msg || data.message || data.detail, 240); } catch (_) { }
     if (response.status === 401 || response.status === 403) {
       throw new Error(`SeaTable 拒绝访问表“${table}”（HTTP ${response.status}）。请确认 Base Token 对该 Base 有读写权限、Base UUID 正确，并且表名完全匹配${detail ? `：${detail}` : ''}`);
     }
