@@ -124,7 +124,9 @@ function buildMenu(rows, map) {
   const mealMenus = { lunch: { packages: {}, mainMeat: [], sideMeat: [] }, dinner: { packages: {}, mainMeat: [], sideMeat: [] } };
   const settings = {};
   const diagnostics = { rows: rows.length, settings: 0, packages: 0, dishes: 0, hidden: 0, unknown: 0, unknownTypes: [], sampleKeys: Object.keys(rows[0] || {}).slice(0, 20), sampleKind: Array.isArray(rows[0]) ? 'array' : typeof rows[0], valueKinds: {} };
-  Object.keys(rows[0] || {}).filter((key) => !key.startsWith('_')).slice(0, 12).forEach((key) => { const value = rows[0]?.[key]; diagnostics.valueKinds[key] = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value; });
+  // Some rows may be blank templates; use the first row that has any visible value.
+  const sampleRow = rows.find((row) => row && typeof row === 'object' && !Array.isArray(row) && Object.keys(row).some((key) => !key.startsWith('_') && row[key] !== null && row[key] !== '')) || rows[0] || {};
+  Object.keys(sampleRow).filter((key) => !key.startsWith('_')).slice(0, 12).forEach((key) => { const value = sampleRow[key]; diagnostics.valueKinds[key] = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value; });
   const mealTargets = (value) => {
     const key = clean(value, 20).toLowerCase();
     if (key === 'lunch' || key === '午餐') return ['lunch'];
@@ -133,7 +135,7 @@ function buildMenu(rows, map) {
   };
 
   rows.forEach((row, index) => {
-    const type = clean(fieldValue(row, [columnName(map, 'type'), 'type', 'itemType', '类型']), 30).toLowerCase();
+    const type = clean(fieldValue(row, [columnName(map, 'type'), 'type', 'itemType', '类型']), 30).toLowerCase().replace(/\s+/g, '');
     if (type === 'setting' || type === '设置') {
       diagnostics.settings += 1;
       // Settings (contact and schedule) are configuration, not menu items;
