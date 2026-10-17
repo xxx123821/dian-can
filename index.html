@@ -96,6 +96,14 @@
     .summary span { color: var(--muted); font-size: 13px; }
     .price { font-size: 22px; font-weight: 700; }
     .submit-wrap { padding: 14px 16px 17px; background: #fafafa; border-top: 1px solid var(--line); }
+    .payment-note { margin: 10px 2px 0; color: #333; text-align: center; font-size: 16px; font-weight: 600; line-height: 1.6; }
+    .order-history { padding: 15px 16px; }
+    .order-history h2 { margin: 0 0 10px; font-size: 16px; }
+    .saved-order { padding: 11px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.6; }
+    .saved-order:first-child { border-top: 0; padding-top: 0; }
+    .saved-order-head { display: flex; justify-content: space-between; gap: 10px; font-weight: 650; }
+    .saved-order-time { color: var(--muted); font-size: 12px; }
+    .saved-order-dishes { margin-top: 3px; color: #444; }
     .draft { display: none; padding: 12px; margin-bottom: 12px; border: 1px solid #d8d8d8; border-radius: 7px; background: #fff; }
     .draft.show { display: block; }
     .draft-title { font-size: 13px; font-weight: 650; margin-bottom: 9px; }
@@ -190,8 +198,15 @@
           <button class="secondary" id="editBtn" type="button">返回修改</button>
         </div>
         <button class="primary" id="submitBtn" type="button">生成订单</button>
+        <p class="payment-note">请在群里直接向群主转账订餐金额，祝您用餐愉快！</p>
         <div class="deadline" id="deadlineText"></div>
       </div>
+    </section>
+
+    <section class="card order-history" id="orderHistoryCard" style="display:none">
+      <h2>我最近提交的订单</h2>
+      <div id="orderHistoryList"></div>
+      <div class="hint" style="margin-top:8px">订单记录保存在当前设备的浏览器中。</div>
     </section>
 
     <section class="card closed" id="closedCard">
@@ -209,6 +224,7 @@
       <p id="modalMessage">订单已写入系统。</p>
       <div class="modal-actions">
         <button class="secondary" id="closeModal" type="button">关闭</button>
+        <button class="primary" id="reorderBtn" type="button">再点一份</button>
       </div>
       <p class="tiny">订单号只生成一次，请保存：<span id="modalOrderNoTiny"></span></p>
     </div>
@@ -461,6 +477,55 @@
       $('successModal').classList.add('show');
     }
 
+    function orderHistoryKey() { return `${CONFIG.customerStorageKey}_orders`; }
+
+    function formatOrderTime(value) {
+      const date = new Date(value);
+      if (!Number.isFinite(date.getTime())) return '时间记录不可用';
+      return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(date);
+    }
+
+    function loadOrderHistory() {
+      try {
+        const orders = JSON.parse(localStorage.getItem(orderHistoryKey()) || '[]');
+        return Array.isArray(orders) ? orders.filter((order) => order && typeof order === 'object') : [];
+      } catch (_) { return []; }
+    }
+
+    function saveOrderHistory(order) {
+      try {
+        const orders = [order, ...loadOrderHistory()].slice(0, 30);
+        localStorage.setItem(orderHistoryKey(), JSON.stringify(orders));
+        renderOrderHistory(orders);
+      } catch (_) { /* 存储不可用时仍可正常完成下单 */ }
+    }
+
+    function renderOrderHistory(orders = loadOrderHistory()) {
+      const card = $('orderHistoryCard');
+      if (!orders.length) { card.style.display = 'none'; return; }
+      card.style.display = 'block';
+      $('orderHistoryList').innerHTML = orders.map((order) => `
+        <div class="saved-order">
+          <div class="saved-order-head"><span>序号 ${escapeHtml(order.sequenceNo || '—')} · ${escapeHtml(order.orderNo || '')}</span><span>¥${escapeHtml(order.price ?? '')}</span></div>
+          <div class="saved-order-time">${escapeHtml(order.orderDate || '')} ${escapeHtml(mealSchedule()[order.mealPeriod]?.label || order.mealPeriod || '')} · ${escapeHtml(formatOrderTime(order.submittedAt))}</div>
+          <div>${escapeHtml(order.packageName || '')}</div>
+          <div class="saved-order-dishes">主荤：${escapeHtml(order.mainMeat || '—')}；副荤：${escapeHtml(order.sideMeat || '—')}</div>
+        </div>`).join('');
+    }
+
+    function startAnotherOrder() {
+      $('successModal').classList.remove('show');
+      state.submitted = false;
+      state.orderNo = '';
+      state.draftPayload = null;
+      state.main.clear();
+      state.side.clear();
+      $('draftPanel').classList.remove('show');
+      renderDishes();
+      updateStatus();
+      $('orderCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     function buildOrderPayload(orderNo) {
       const pkg = currentPackage();
       return {
@@ -562,6 +627,7 @@
         state.submitted = true;
         state.draftPayload = null;
         $('draftPanel').classList.remove('show');
+        saveOrderHistory({ ...payload, orderNo: result.orderNo || payload.orderNo, sequenceNo: result.sequenceNo, orderDate: result.orderDate || new Date().toLocaleDateString('en-CA'), submittedAt: new Date().toISOString() });
         showSuccess(result.orderNo || payload.orderNo, result.sequenceNo);
       } catch (error) {
         alert(`订单提交失败：${error.message || '请检查网络或联系管理员'}`);
@@ -574,6 +640,7 @@
     });
     $('editBtn').addEventListener('click', () => { invalidateDraft(); updateStatus(); });
     $('closeModal').addEventListener('click', () => $('successModal').classList.remove('show'));
+    $('reorderBtn').addEventListener('click', startAnotherOrder);
     $('successModal').addEventListener('click', (event) => { if (event.target === $('successModal')) $('successModal').classList.remove('show'); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') $('successModal').classList.remove('show'); });
 
@@ -586,6 +653,7 @@
       loadCustomerInfo();
       $('configNotice').style.display = location.protocol === 'file:' ? 'block' : 'none';
       await loadRemoteMenu();
+      renderOrderHistory();
       $('contactNotice').textContent = `点餐联系人：${CONFIG.contactName} ${CONFIG.contactPhone}`;
       const lunch = CONFIG.mealSchedule.lunch;
       const dinner = CONFIG.mealSchedule.dinner;
