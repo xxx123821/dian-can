@@ -22,6 +22,8 @@ function parseMap(raw, label) {
   } catch (_) { throw new Error(`${label} 必须是有效 JSON 对象`); }
 }
 const MENU_DEFAULT_COLUMNS = { type: '类型', key: '键', name: '名称', price: '价格', mainCount: '主荤数量', sideCount: '副荤数量', group: '分组', sort: '排序', value: '值', enabled: '启用', published: '上架' };
+const ORDER_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期', sequenceNo: '序号', mealPeriod: '用餐时段', packageName: '套餐名称', price: '价格', mainMeat: '主荤', sideMeat: '副荤', name: '姓名', phone: '电话' };
+const STATS_DEFAULT_COLUMNS = { orderDate: '订单日期', dishGroup: '分组', dishName: '菜名', quantity: '份数' };
 function columnName(map, key) { return clean(map[key] || MENU_DEFAULT_COLUMNS[key] || key, 100) || key; }
 function resolveMenuMap(rows, configured) {
   const map = { ...configured };
@@ -86,8 +88,8 @@ function normalizeSetting(row, map) { return { id: clean(row?._id, 100), key: cl
 
 async function readMenuRows(env) { return rowsFrom(await seaTable(env, env.SEATABLE_MENU_TABLE_NAME, 'GET')); }
 async function readLive(env, requestedDate = '') {
-  const orderMap = parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP');
-  const statsMap = parseMap(env.SEATABLE_STATS_COLUMN_MAP, 'SEATABLE_STATS_COLUMN_MAP');
+  const orderMap = { ...ORDER_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP') };
+  const statsMap = { ...STATS_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_STATS_COLUMN_MAP, 'SEATABLE_STATS_COLUMN_MAP') };
   const targetDate = allowedHistoryDate(requestedDate);
   const orders = rowsFrom(await seaTable(env, env.SEATABLE_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(orderMap, 'orderDate'), 'orderDate', '日期')) === targetDate).map((row) => ({
     orderNo: field(row, columnName(orderMap, 'orderNo'), 'orderNo', '订单号'), sequenceNo: field(row, columnName(orderMap, 'sequenceNo'), 'sequenceNo', '序号', '订单序号'),

@@ -15,7 +15,9 @@ function parseMap(raw, label) {
   } catch (_) { throw new Error(`${label} 必须是有效 JSON 对象`); }
 }
 
-function columnName(map, key) { return clean(map[key] || key, 100) || key; }
+const ORDER_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期', sequenceNo: '序号', mealPeriod: '用餐时段', packageName: '套餐名称', price: '价格', mainMeat: '主荤', sideMeat: '副荤', name: '姓名', phone: '电话' };
+const STATS_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期', sequenceNo: '序号', mealPeriod: '用餐时段', dishGroup: '分组', dishName: '菜名', quantity: '份数', packageName: '套餐名称', name: '姓名', phone: '电话' };
+function columnName(map, key) { return clean(map[key] || ORDER_DEFAULT_COLUMNS[key] || STATS_DEFAULT_COLUMNS[key] || key, 100) || key; }
 
 function apiConfig(env) {
   const baseUuid = clean(env.SEATABLE_BASE_UUID, 120);
