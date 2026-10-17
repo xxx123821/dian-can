@@ -8,7 +8,10 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   if (!baseUuid || !apiToken) throw new Error('服务端尚未配置 SeaTable 表格 UUID 或 API Token');
   if (!table) throw new Error('未配置 SeaTable 表名');
   const configuredOrigin = String(env.SEATABLE_API_ORIGIN || '').trim().replace(/\/$/, '');
-  const origins = [...new Set([configuredOrigin, 'https://cloud.seatable.cn'].filter(Boolean))];
+  // This deployment uses SeaTable China Cloud. Try the official endpoint
+  // first so an old or mistyped optional variable cannot route writes to a
+  // different host; a custom origin remains available as a fallback.
+  const origins = [...new Set(['https://cloud.seatable.cn', configuredOrigin].filter(Boolean))];
 
   let tokenResponse;
   let origin = origins[0];
