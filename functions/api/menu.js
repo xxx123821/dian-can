@@ -130,8 +130,6 @@ function buildMenu(rows, map) {
     },
     contactName: settings.contactName || '',
     contactPhone: settings.contactPhone || '',
-    soupNotice: settings.soupNotice || '',
-    giftDish: settings.giftDish || '',
     orderingNotice: settings.orderingNotice || '',
     orderDeadline: settings.orderDeadline || null
   };

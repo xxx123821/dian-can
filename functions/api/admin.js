@@ -131,7 +131,7 @@ async function saveMenu(env, payload) {
   for (const item of items) { if (!clean(item.name, 100) || !clean(item.key, 80)) continue; const row = rowForItem(item, map); const id = clean(item.id, 100); if (id && byId.has(id)) await seaTable(env, table, 'PUT', row, id); else await seaTable(env, table, 'POST', row); }
   const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings : {};
   const settingRows = new Map(existing.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase())).map((row) => [clean(field(row, columnName(map, 'key'), 'key', '键'), 80), row]));
-  for (const key of ['contactName', 'contactPhone', 'soupNotice', 'giftDish', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) { const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true }; const old = settingRows.get(key); if (old?._id) await seaTable(env, table, 'PUT', row, old._id); else await seaTable(env, table, 'POST', row); }
+  for (const key of ['contactName', 'contactPhone', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) { const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true }; const old = settingRows.get(key); if (old?._id) await seaTable(env, table, 'PUT', row, old._id); else await seaTable(env, table, 'POST', row); }
   return normalizeMenu(await readMenuRows(env), map);
 }
 
