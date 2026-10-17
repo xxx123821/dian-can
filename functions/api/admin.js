@@ -113,8 +113,22 @@ async function saveMenu(env, payload) {
   const items = [...(Array.isArray(payload.packages) ? payload.packages : []), ...(Array.isArray(payload.dishes) ? payload.dishes : [])];
   for (const item of items) { if (!clean(item.name, 100) || !clean(item.key, 80)) continue; const row = rowForItem(item, map); const id = clean(item.id, 100); if (id && byId.has(id)) await seaTable(env, table, 'PUT', row, id); else await seaTable(env, table, 'POST', row); }
   const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings : {};
-  const settingRows = new Map(existing.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase())).map((row) => [clean(field(row, columnName(map, 'key'), 'key', '键'), 80), row]));
-  for (const key of ['contactName', 'contactPhone', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) { const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true }; const old = settingRows.get(key); if (old?._id) await seaTable(env, table, 'PUT', row, old._id); else await seaTable(env, table, 'POST', row); }
+  const settingRows = new Map();
+  existing.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase())).forEach((row) => {
+    const key = clean(field(row, columnName(map, 'key'), 'key', '键'), 80);
+    if (!key) return;
+    if (!settingRows.has(key)) settingRows.set(key, []);
+    settingRows.get(key).push(row);
+  });
+  for (const key of ['contactName', 'contactPhone', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) {
+    const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true };
+    const oldRows = settingRows.get(key) || [];
+    if (oldRows.length) {
+      // Older failed saves may have created duplicate setting rows. Keep all
+      // duplicates consistent so a later row cannot overwrite a new value.
+      for (const old of oldRows) if (old?._id) await seaTable(env, table, 'PUT', row, old._id);
+    } else await seaTable(env, table, 'POST', row);
+  }
   return normalizeMenu(await readMenuRows(env), map);
 }
 
