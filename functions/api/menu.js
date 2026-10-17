@@ -82,7 +82,7 @@ async function readRows(env) {
 function buildMenu(rows, map) {
   const mealMenus = { lunch: { packages: {}, mainMeat: [], sideMeat: [] }, dinner: { packages: {}, mainMeat: [], sideMeat: [] } };
   const settings = {};
-  const diagnostics = { rows: rows.length, settings: 0, packages: 0, dishes: 0, hidden: 0, unknown: 0 };
+  const diagnostics = { rows: rows.length, settings: 0, packages: 0, dishes: 0, hidden: 0, unknown: 0, unknownTypes: [] };
   const mealTargets = (value) => {
     const key = clean(value, 20).toLowerCase();
     if (key === 'lunch' || key === '午餐') return ['lunch'];
@@ -130,6 +130,7 @@ function buildMenu(rows, map) {
       return;
     }
     diagnostics.unknown += 1;
+    if (diagnostics.unknownTypes.length < 8 && type) diagnostics.unknownTypes.push(type);
   });
 
   Object.values(mealMenus).forEach((meal) => { meal.mainMeat.sort((a, b) => a.sort - b.sort); meal.sideMeat.sort((a, b) => a.sort - b.sort); meal.dishes = { mainMeat: meal.mainMeat.map((item) => item.name), sideMeat: meal.sideMeat.map((item) => item.name) }; delete meal.mainMeat; delete meal.sideMeat; });
@@ -152,7 +153,7 @@ function buildMenu(rows, map) {
   const warnings = [];
   if (!Object.keys(mealMenus.lunch.packages).length && !Object.keys(mealMenus.dinner.packages).length) warnings.push('菜单表中没有启用的套餐');
   if ((!mealMenus.lunch.dishes.mainMeat.length || !mealMenus.lunch.dishes.sideMeat.length) && (!mealMenus.dinner.dishes.mainMeat.length || !mealMenus.dinner.dishes.sideMeat.length)) warnings.push('菜单表中没有启用的菜品');
-  if (warnings.length) warnings.push(`诊断：读取 ${diagnostics.rows} 行，设置 ${diagnostics.settings} 条，套餐 ${diagnostics.packages} 条，菜品 ${diagnostics.dishes} 条，被隐藏 ${diagnostics.hidden} 条，未知类型 ${diagnostics.unknown} 条`);
+  if (warnings.length) warnings.push(`诊断：读取 ${diagnostics.rows} 行，设置 ${diagnostics.settings} 条，套餐 ${diagnostics.packages} 条，菜品 ${diagnostics.dishes} 条，被隐藏 ${diagnostics.hidden} 条，未知类型 ${diagnostics.unknown} 条${diagnostics.unknownTypes.length ? `（${diagnostics.unknownTypes.join('、')}）` : ''}`);
   if (warnings.length) result.menuWarning = warnings.join('；');
   return result;
 }
