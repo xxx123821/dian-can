@@ -31,6 +31,39 @@ function parseMap(raw, label) {
 
 function columnName(map, key) { return clean(map[key] || key, 100) || key; }
 
+function resolveMenuMap(rows, configured = {}) {
+  const map = { ...configured };
+  const sample = rows.find((row) => row && typeof row === 'object' && !Array.isArray(row)) || {};
+  const keys = Object.keys(sample).filter((key) => !key.startsWith('_'));
+  // Some SeaTable API versions return internal column IDs (for example
+  // `0000`, `P0Ac`) instead of the visible Chinese column names. Infer those
+  // IDs from their values so the public menu stays compatible with either API.
+  const allValues = (key) => rows.map((row) => row?.[key]).filter((value) => value !== undefined && value !== null).map((value) => String(value).trim());
+  const score = (key, kind) => {
+    const values = allValues(key); let result = 0;
+    values.forEach((value) => {
+      const lower = value.toLowerCase();
+      if (kind === 'type' && ['套餐', 'package', '菜品', 'dish', '设置', 'setting'].includes(lower)) result += 10;
+      if (kind === 'group' && ['主荤', '副荤', '主肉', '半荤', 'mainmeat', 'sidemeat'].includes(lower)) result += 8;
+      if (kind === 'mealPeriod' && ['全部', '午餐', '晚餐', 'all', 'lunch', 'dinner'].includes(lower)) result += 8;
+      if (kind === 'settingKey' && ['contactname', 'contactphone', 'lunchstart', 'lunchend', 'dinnerstart', 'dinnerend'].includes(lower)) result += 9;
+      if (kind === 'bool' && ['true', 'false', '是', '否', '1', '0'].includes(lower)) result += 2;
+    });
+    return result;
+  };
+  const infer = (name, kind) => {
+    if (map[name]) return;
+    const choice = keys.filter((key) => !Object.values(map).includes(key)).sort((a, b) => score(b, kind) - score(a, kind))[0];
+    if (choice && score(choice, kind) > 0) map[name] = choice;
+  };
+  infer('type', 'type'); infer('group', 'group'); infer('mealPeriod', 'mealPeriod'); infer('key', 'settingKey');
+  // If a field has no distinctive values, use the table's declared order as a
+  // final fallback (the documented menu schema order).
+  const schema = ['type', 'key', 'name', 'price', 'mainCount', 'sideCount', 'group', 'sort', 'mealPeriod', 'value', 'enabled', 'published'];
+  keys.forEach((column, index) => { const name = schema[index]; if (name && !map[name]) map[name] = column; });
+  return map;
+}
+
 const field = (row, ...names) => {
   for (const name of names) {
     if (row && row[name] !== undefined && row[name] !== null) return row[name];
@@ -80,6 +113,7 @@ async function readRows(env) {
 }
 
 function buildMenu(rows, map) {
+  map = resolveMenuMap(rows, map);
   const mealMenus = { lunch: { packages: {}, mainMeat: [], sideMeat: [] }, dinner: { packages: {}, mainMeat: [], sideMeat: [] } };
   const settings = {};
   const diagnostics = { rows: rows.length, settings: 0, packages: 0, dishes: 0, hidden: 0, unknown: 0, unknownTypes: [], sampleKeys: Object.keys(rows[0] || {}).slice(0, 20), sampleKind: Array.isArray(rows[0]) ? 'array' : typeof rows[0] };
