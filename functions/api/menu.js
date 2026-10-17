@@ -19,6 +19,17 @@ const json = (body, status = 200, extraHeaders = {}) => new Response(JSON.string
 
 const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
 
+function parseMap(raw, label) {
+  if (!String(raw || '').trim()) return {};
+  try {
+    const value = JSON.parse(String(raw));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not object');
+    return value;
+  } catch (_) { throw new Error(`${label} 必须是有效 JSON 对象`); }
+}
+
+function columnName(map, key) { return clean(map[key] || key, 100) || key; }
+
 const field = (row, ...names) => {
   for (const name of names) {
     if (row && row[name] !== undefined && row[name] !== null) return row[name];
@@ -28,9 +39,9 @@ const field = (row, ...names) => {
 
 const enabled = (value) => !['0', 'false', 'no', 'off', '否', '停用', '下架'].includes(String(value ?? '').trim().toLowerCase());
 
-function isPublished(row) {
-  const status = field(row, 'published', 'publish', '上架', '发布状态');
-  const enabledValue = field(row, 'enabled', 'active', '启用');
+function isPublished(row, map) {
+  const status = field(row, columnName(map, 'published'), 'published', 'publish', '上架', '发布状态');
+  const enabledValue = field(row, columnName(map, 'enabled'), 'enabled', 'active', '启用');
   return enabled(status) && enabled(enabledValue);
 }
 
@@ -64,37 +75,37 @@ async function readRows(env) {
   return Array.isArray(data) ? data : (Array.isArray(data.rows) ? data.rows : []);
 }
 
-function buildMenu(rows) {
+function buildMenu(rows, map) {
   const packages = {};
   const mainMeat = [];
   const sideMeat = [];
   const settings = {};
 
   rows.forEach((row, index) => {
-    const type = clean(field(row, 'type', 'itemType', '类型'), 30).toLowerCase();
-    if (!isPublished(row)) return;
+    const type = clean(field(row, columnName(map, 'type'), 'type', 'itemType', '类型'), 30).toLowerCase();
+    if (!isPublished(row, map)) return;
     if (type === 'setting' || type === '设置') {
-      const key = clean(field(row, 'key', 'settingKey', '键'), 80);
-      if (key) settings[key] = clean(field(row, 'value', 'settingValue', '值'), 500);
+      const key = clean(field(row, columnName(map, 'key'), 'key', 'settingKey', '键'), 80);
+      if (key) settings[key] = clean(field(row, columnName(map, 'value'), 'value', 'settingValue', '值'), 500);
       return;
     }
     if (type === 'package' || type === '套餐') {
-      const key = clean(field(row, 'key', 'packageKey', '套餐键'), 20);
-      const name = clean(field(row, 'name', 'packageName', '套餐名称'), 60);
+      const key = clean(field(row, columnName(map, 'key'), 'key', 'packageKey', '套餐键'), 20);
+      const name = clean(field(row, columnName(map, 'name'), 'name', 'packageName', '套餐名称'), 60);
       if (!key || !name) return;
       packages[key] = {
         name,
-        price: numberOr(field(row, 'price', '价格'), 0),
-        mainCount: Math.max(0, Math.floor(numberOr(field(row, 'mainCount', '主肉数量'), 0))),
-        sideCount: Math.max(0, Math.floor(numberOr(field(row, 'sideCount', '半荤数量'), 0)))
+        price: numberOr(field(row, columnName(map, 'price'), 'price', '价格'), 0),
+        mainCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'mainCount'), 'mainCount', '主荤数量', '主肉数量'), 0))),
+        sideCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'sideCount'), 'sideCount', '副荤数量', '半荤数量'), 0)))
       };
       return;
     }
     if (type === 'dish' || type === '菜品') {
-      const name = clean(field(row, 'name', 'dishName', '菜品名称'), 80);
-      const group = clean(field(row, 'group', 'dishGroup', '分组'), 30);
+      const name = clean(field(row, columnName(map, 'name'), 'name', 'dishName', '菜品名称'), 80);
+      const group = clean(field(row, columnName(map, 'group'), 'group', 'dishGroup', '分组'), 30);
       if (!name || (group !== 'mainMeat' && group !== 'sideMeat' && group !== '主肉' && group !== '半荤' && group !== '主荤' && group !== '副荤')) return;
-      const item = { name, sort: numberOr(field(row, 'sort', '排序'), index) };
+      const item = { name, sort: numberOr(field(row, columnName(map, 'sort'), 'sort', '排序'), index) };
       if (group === 'mainMeat' || group === '主肉' || group === '主荤') mainMeat.push(item);
       else sideMeat.push(item);
     }
@@ -106,12 +117,13 @@ function buildMenu(rows) {
     packages,
     dishes: { mainMeat: mainMeat.map((item) => item.name), sideMeat: sideMeat.map((item) => item.name) },
     mealSchedule: {
-      lunch: { label: '午餐', start: '00:00', end: '10:30' },
-      dinner: { label: '晚餐', start: '12:00', end: '16:00' }
+      lunch: { label: '午餐', start: settings.lunchStart || '00:00', end: settings.lunchEnd || '10:30' },
+      dinner: { label: '晚餐', start: settings.dinnerStart || '12:00', end: settings.dinnerEnd || '16:00' }
     },
     contactName: settings.contactName || '',
     contactPhone: settings.contactPhone || '',
     soupNotice: settings.soupNotice || '',
+    giftDish: settings.giftDish || '',
     orderingNotice: settings.orderingNotice || '',
     orderDeadline: settings.orderDeadline || null
   };
@@ -122,7 +134,8 @@ function buildMenu(rows) {
 
 export async function onRequestGet({ env }) {
   try {
-    const menu = buildMenu(await readRows(env));
+    const map = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
+    const menu = buildMenu(await readRows(env), map);
     return json({ ok: true, ...menu }, 200, { 'cache-control': 'no-store' });
   } catch (error) {
     console.error('Menu read failed', error);

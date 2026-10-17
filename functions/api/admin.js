@@ -1,0 +1,125 @@
+/** Protected merchant API. Protect /admin.html and /api/admin with Cloudflare Access. */
+
+const json = (body, status = 200) => new Response(JSON.stringify(body), {
+  status,
+  headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
+});
+const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
+const numberOr = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const rowsFrom = (data) => Array.isArray(data) ? data : (Array.isArray(data?.rows) ? data.rows : []);
+const field = (row, ...names) => {
+  for (const name of names) if (row?.[name] !== undefined && row?.[name] !== null) return row[name];
+  return '';
+};
+const enabled = (value) => !['0', 'false', 'no', 'off', '否', '停用', '下架'].includes(String(value ?? '').trim().toLowerCase());
+
+function parseMap(raw, label) {
+  if (!String(raw || '').trim()) return {};
+  try {
+    const value = JSON.parse(String(raw));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not object');
+    return value;
+  } catch (_) { throw new Error(`${label} 必须是有效 JSON 对象`); }
+}
+function columnName(map, key) { return clean(map[key] || key, 100) || key; }
+function apiConfig(env) {
+  const baseUuid = clean(env.SEATABLE_BASE_UUID, 120);
+  const token = clean(env.SEATABLE_BASE_TOKEN, 300);
+  if (!baseUuid || !token) throw new Error('服务端尚未配置 SeaTable 参数');
+  return { baseUuid, token, origin: String(env.SEATABLE_API_ORIGIN || 'https://cloud.seatable.cn').replace(/\/$/, ''), scheme: String(env.SEATABLE_AUTH_SCHEME || 'Bearer').trim() || 'Bearer' };
+}
+async function seaTable(env, tableName, method = 'GET', row = null, rowId = '') {
+  const config = apiConfig(env); const table = clean(tableName, 100);
+  if (!table) throw new Error('未配置 SeaTable 表名');
+  const query = new URLSearchParams({ table_name: table });
+  if (method === 'GET') query.set('limit', '1000');
+  const suffix = rowId ? `${encodeURIComponent(rowId)}/` : '';
+  const endpoint = `${config.origin}/api-gateway/api/v2/dtables/${encodeURIComponent(config.baseUuid)}/rows/${suffix}${rowId ? `?${query}` : `?${query}`}`;
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method,
+      headers: { Authorization: `${config.scheme} ${config.token}`, 'Content-Type': 'application/json' },
+      body: method === 'GET' ? undefined : JSON.stringify({ table_name: table, row })
+    });
+  } catch (_) { throw new Error('无法连接 SeaTable'); }
+  const text = await response.text();
+  if (!response.ok) {
+    let reason = ''; try { const parsed = JSON.parse(text); reason = clean(parsed.error || parsed.message || parsed.detail, 180); } catch (_) { }
+    throw new Error(reason ? `SeaTable 请求失败：${reason}` : `SeaTable 请求失败（HTTP ${response.status}）`);
+  }
+  try { return text ? JSON.parse(text) : {}; } catch (_) { return {}; }
+}
+function assertAdmin(request, env) {
+  const allowed = clean(env.ADMIN_ACCESS_EMAILS, 1000).split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+  const email = clean(request.headers.get('Cf-Access-Authenticated-User-Email'), 200).toLowerCase();
+  if (!allowed.length) throw Object.assign(new Error('后台尚未启用访问保护：请设置 ADMIN_ACCESS_EMAILS，并用 Cloudflare Access 保护 /admin.html 与 /api/admin'), { status: 503 });
+  if (!email || !allowed.includes(email)) throw Object.assign(new Error('没有商家后台访问权限'), { status: 403 });
+}
+function beijingDate() {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+function dateOnly(value) { return String(value || '').slice(0, 10); }
+function normalizeSetting(row, map) { return { id: clean(row?._id, 100), key: clean(field(row, columnName(map, 'key'), 'key', '键'), 80), value: clean(field(row, columnName(map, 'value'), 'value', '值'), 500), enabled: enabled(field(row, columnName(map, 'enabled'), 'enabled', '启用')), published: enabled(field(row, columnName(map, 'published'), 'published', '上架')) }; }
+
+async function readMenuRows(env) { return rowsFrom(await seaTable(env, env.SEATABLE_MENU_TABLE_NAME, 'GET')); }
+async function readLive(env) {
+  const orderMap = parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP');
+  const statsMap = parseMap(env.SEATABLE_STATS_COLUMN_MAP, 'SEATABLE_STATS_COLUMN_MAP');
+  const today = beijingDate();
+  const orders = rowsFrom(await seaTable(env, env.SEATABLE_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(orderMap, 'orderDate'), 'orderDate', '日期')) === today).map((row) => ({
+    orderNo: field(row, columnName(orderMap, 'orderNo'), 'orderNo', '订单号'), sequenceNo: field(row, columnName(orderMap, 'sequenceNo'), 'sequenceNo', '序号', '订单序号'),
+    mealPeriod: field(row, columnName(orderMap, 'mealPeriod'), 'mealPeriod', '用餐时段'), packageName: field(row, columnName(orderMap, 'packageName'), 'packageName', '套餐名称'),
+    price: field(row, columnName(orderMap, 'price'), 'price', '价格'), mainMeat: field(row, columnName(orderMap, 'mainMeat'), 'mainMeat', '主荤', '主肉'), sideMeat: field(row, columnName(orderMap, 'sideMeat'), 'sideMeat', '副荤', '半荤'),
+    name: field(row, columnName(orderMap, 'name'), 'name', '姓名'), phone: field(row, columnName(orderMap, 'phone'), 'phone', '手机号码', '电话')
+  }));
+  const statsRows = rowsFrom(await seaTable(env, env.SEATABLE_STATS_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(statsMap, 'orderDate'), 'orderDate', '日期')) === today);
+  const totals = {};
+  statsRows.forEach((row) => { const name = clean(field(row, columnName(statsMap, 'dishName'), 'dishName', '菜名', '菜品名称'), 80); if (!name) return; const group = clean(field(row, columnName(statsMap, 'dishGroup'), 'dishGroup', '分组'), 30); totals[`${group}::${name}`] = (totals[`${group}::${name}`] || 0) + numberOr(field(row, columnName(statsMap, 'quantity'), 'quantity', '份数'), 1); });
+  const stats = Object.entries(totals).map(([key, quantity]) => { const [group, dishName] = key.split('::'); return { group, dishName, quantity }; }).sort((a, b) => a.group.localeCompare(b.group) || a.dishName.localeCompare(b.dishName));
+  return { date: today, orders, stats };
+}
+
+function normalizeMenu(rows, map) {
+  const packages = []; const dishes = []; const settings = {};
+  rows.forEach((row, index) => {
+    const type = clean(field(row, columnName(map, 'type'), 'type', '类型', 'itemType'), 30).toLowerCase();
+    const common = { id: clean(row?._id, 100), enabled: enabled(field(row, columnName(map, 'enabled'), 'enabled', '启用')), published: enabled(field(row, columnName(map, 'published'), 'published', '上架')) };
+    if (type === 'setting' || type === '设置') { const item = normalizeSetting(row, map); if (item.key) settings[item.key] = item; return; }
+    if (type === 'package' || type === '套餐') { packages.push({ ...common, type: 'package', key: clean(field(row, columnName(map, 'key'), 'key', '套餐键'), 20), name: clean(field(row, columnName(map, 'name'), 'name', '套餐名称'), 60), price: numberOr(field(row, columnName(map, 'price'), 'price', '价格')), mainCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'mainCount'), 'mainCount', '主荤数量', '主肉数量')))), sideCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'sideCount'), 'sideCount', '副荤数量', '半荤数量')))) }); return; }
+    if (type === 'dish' || type === '菜品') { dishes.push({ ...common, type: 'dish', key: clean(field(row, columnName(map, 'key'), 'key', '菜品键'), 60) || `dish-${index + 1}`, name: clean(field(row, columnName(map, 'name'), 'name', '菜名', '菜品名称'), 80), group: clean(field(row, columnName(map, 'group'), 'group', '分组'), 30), sort: numberOr(field(row, columnName(map, 'sort'), 'sort', '排序'), index) }); }
+  });
+  packages.sort((a, b) => a.key.localeCompare(b.key)); dishes.sort((a, b) => a.sort - b.sort); return { packages, dishes, settings };
+}
+function rowForItem(item, map) {
+  const row = { [columnName(map, 'type')]: item.type, [columnName(map, 'key')]: clean(item.key, 80), [columnName(map, 'name')]: clean(item.name, 100), [columnName(map, 'enabled')]: Boolean(item.enabled), [columnName(map, 'published')]: Boolean(item.published) };
+  if (item.type === 'package') Object.assign(row, { [columnName(map, 'price')]: numberOr(item.price), [columnName(map, 'mainCount')]: Math.max(0, Math.floor(numberOr(item.mainCount))), [columnName(map, 'sideCount')]: Math.max(0, Math.floor(numberOr(item.sideCount))) });
+  if (item.type === 'dish') Object.assign(row, { [columnName(map, 'group')]: clean(item.group, 30), [columnName(map, 'sort')]: numberOr(item.sort) });
+  return row;
+}
+async function saveMenu(env, payload) {
+  const table = clean(env.SEATABLE_MENU_TABLE_NAME, 100); if (!table) throw new Error('未配置菜单表');
+  const map = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'); const existing = await readMenuRows(env); const byId = new Map(existing.map((row) => [clean(row._id, 100), row]));
+  const items = [...(Array.isArray(payload.packages) ? payload.packages : []), ...(Array.isArray(payload.dishes) ? payload.dishes : [])];
+  for (const item of items) { if (!clean(item.name, 100) || !clean(item.key, 80)) continue; const row = rowForItem(item, map); const id = clean(item.id, 100); if (id && byId.has(id)) await seaTable(env, table, 'PUT', row, id); else await seaTable(env, table, 'POST', row); }
+  const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings : {};
+  const settingRows = new Map(existing.filter((row) => clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase() === 'setting').map((row) => [clean(field(row, columnName(map, 'key'), 'key', '键'), 80), row]));
+  for (const key of ['contactName', 'contactPhone', 'soupNotice', 'giftDish', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) { const row = { [columnName(map, 'type')]: 'setting', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true }; const old = settingRows.get(key); if (old?._id) await seaTable(env, table, 'PUT', row, old._id); else await seaTable(env, table, 'POST', row); }
+  return normalizeMenu(await readMenuRows(env), map);
+}
+
+export async function onRequest(context) {
+  try {
+    assertAdmin(context.request, context.env);
+    if (context.request.method === 'GET') {
+      const url = new URL(context.request.url);
+      if (url.searchParams.get('section') === 'live') return json({ ok: true, ...(await readLive(context.env)) });
+      const map = parseMap(context.env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
+      return json({ ok: true, menu: normalizeMenu(await readMenuRows(context.env), map), ...(await readLive(context.env)) });
+    }
+    if (context.request.method === 'POST') { const payload = await context.request.json(); const map = parseMap(context.env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'); return json({ ok: true, menu: await saveMenu(context.env, payload) }); }
+    return json({ ok: false, error: 'Method Not Allowed' }, 405);
+  } catch (error) { console.error('Admin request failed', error); return json({ ok: false, error: error.message || '后台请求失败' }, error.status || 502); }
+}

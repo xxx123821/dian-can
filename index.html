@@ -26,6 +26,7 @@
       contactName: '李明更',
       contactPhone: '18201531980',
       soupNotice: '赠送汤品：玉米胡萝卜排骨汤',
+      giftDish: '',
       // 旧版总截止时间兼容配置；设置 mealSchedule 后优先使用分时段规则
       orderDeadline: null,
       // 正式提交接口；部署到 Cloudflare Pages 后由 functions/api/order.js 处理
@@ -129,6 +130,7 @@
       <h1>今日点餐</h1>
       <p id="contactNotice"></p>
       <p class="notice-line" id="soupNotice"></p>
+      <p class="notice-line" id="giftDish"></p>
       <p class="rules">套餐价格：<br>【一主荤 + 二个副荤】👉 13元<br>【二主荤 + 一个副荤】👉 16元</p>
       <p class="meal-schedule" id="mealScheduleNotice">点餐时段：午餐 00:00 开始，10:30 结束；晚餐 12:00 开始，16:00 结束。</p>
       <p id="deadlineNotice">请选择午餐或晚餐</p>
@@ -467,6 +469,7 @@
       if (menu.contactName) CONFIG.contactName = String(menu.contactName);
       if (menu.contactPhone) CONFIG.contactPhone = String(menu.contactPhone);
       if (Object.prototype.hasOwnProperty.call(menu, 'soupNotice')) CONFIG.soupNotice = String(menu.soupNotice || '');
+      if (Object.prototype.hasOwnProperty.call(menu, 'giftDish')) CONFIG.giftDish = String(menu.giftDish || '');
       if (!CONFIG.packages[state.packageKey]) state.packageKey = Object.keys(CONFIG.packages)[0];
       state.main.clear();
       state.side.clear();
@@ -568,6 +571,7 @@
       await loadRemoteMenu();
       $('contactNotice').textContent = `点餐联系人：${CONFIG.contactName} ${CONFIG.contactPhone}`;
       $('soupNotice').textContent = CONFIG.soupNotice ? `✅ ${CONFIG.soupNotice}` : '';
+      $('giftDish').textContent = CONFIG.giftDish ? `✅ 赠送菜品：${CONFIG.giftDish}` : '';
       const lunch = CONFIG.mealSchedule.lunch;
       const dinner = CONFIG.mealSchedule.dinner;
       $('mealScheduleNotice').textContent = `点餐时段：${lunch.label} ${lunch.start} 开始，${lunch.end} 结束；${dinner.label} ${dinner.start} 开始，${dinner.end} 结束。`;
