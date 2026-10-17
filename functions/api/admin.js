@@ -125,7 +125,12 @@ async function saveMenu(env, payload) {
   const table = clean(env.SEATABLE_MENU_TABLE_NAME, 100); if (!table) throw new Error('未配置菜单表');
   const configuredMap = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'); const existing = await readMenuRows(env); const map = resolveMenuMap(existing, configuredMap); const byId = new Map(existing.map((row) => [clean(row._id, 100), row]));
   const items = [...(Array.isArray(payload.packages) ? payload.packages : []), ...(Array.isArray(payload.dishes) ? payload.dishes : [])];
-  for (const item of items) { if (!clean(item.name, 100) || !clean(item.key, 80)) continue; const row = rowForItem(item, map); const id = clean(item.id, 100); if (id && byId.has(id)) await seaTable(env, table, 'PUT', row, id); else await seaTable(env, table, 'POST', row); }
+  const updates = []; const inserts = [];
+  for (const item of items) {
+    if (!clean(item.name, 100) || !clean(item.key, 80)) continue;
+    const row = rowForItem(item, map); const id = clean(item.id, 100);
+    if (id && byId.has(id)) updates.push({ row_id: id, row }); else inserts.push(row);
+  }
   const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings : {};
   // Keep every row for a setting key. Older saves could have created duplicate
   // rows; updating only one leaves another stale row that may win on reads.
@@ -140,10 +145,13 @@ async function saveMenu(env, payload) {
   for (const key of ['contactName', 'contactPhone', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) {
     const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true };
     const oldRows = settingRows.get(key) || [];
-    if (oldRows.length) {
-      for (const old of oldRows) if (old?._id) await seaTable(env, table, 'PUT', row, old._id);
-    } else await seaTable(env, table, 'POST', row);
+    if (oldRows.length) for (const old of oldRows) if (old?._id) updates.push({ row_id: old._id, row });
+    else inserts.push(row);
   }
+  // One batch request per operation keeps the save well below Cloudflare's
+  // Worker subrequest limit, even when the menu has many dishes/settings.
+  if (updates.length) await seaTable(env, table, 'PUT', updates);
+  if (inserts.length) await seaTable(env, table, 'POST', inserts);
   return normalizeMenu(await readMenuRows(env), map);
 }
 
@@ -161,13 +169,15 @@ async function saveSettings(env, settings) {
     rows.push(row);
     settingRows.set(key, rows);
   });
+  const updates = []; const inserts = [];
   for (const key of ['contactName', 'contactPhone', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) {
     const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings?.[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true };
     const oldRows = settingRows.get(key) || [];
-    if (oldRows.length) {
-      for (const old of oldRows) if (old?._id) await seaTable(env, table, 'PUT', row, old._id);
-    } else await seaTable(env, table, 'POST', row);
+    if (oldRows.length) for (const old of oldRows) if (old?._id) updates.push({ row_id: old._id, row });
+    else inserts.push(row);
   }
+  if (updates.length) await seaTable(env, table, 'PUT', updates);
+  if (inserts.length) await seaTable(env, table, 'POST', inserts);
   return normalizeMenu(await readMenuRows(env), map);
 }
 

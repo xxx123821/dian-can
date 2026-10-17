@@ -52,10 +52,11 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   // row-id URL (the older Base API form) returns HTTP 405 on cloud.seatable.cn.
   const collectionEndpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/`;
   const endpoint = `${collectionEndpoint}?${query}`;
+  const batch = Array.isArray(row);
   const requestBody = method === 'POST'
-    ? { table_name: table, rows: [row] }
+    ? { table_name: table, rows: batch ? row : [row] }
     : method === 'PUT'
-      ? { table_name: table, updates: [{ row_id: rowId, row }] }
+      ? { table_name: table, updates: batch ? row : [{ row_id: rowId, row }] }
       : { table_name: table, row };
   let response;
   const send = (url, body, requestMethod = method) => fetch(url, {
@@ -70,10 +71,10 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
     // SeaTable cloud has had two gateway write formats in production. Try the
     // current body first, then the older single-row/row-id forms when the
     // gateway rejects it. Never retry after a successful response.
-    if (method === 'POST') {
+    if (method === 'POST' && !batch) {
       candidates.push({ url: endpoint, body: { table_name: table, row }, method });
       candidates.push({ url: collectionEndpoint, body: requestBody, method });
-    } else if (method === 'PUT' && rowId) {
+    } else if (method === 'PUT' && rowId && !batch) {
       candidates.push({ url: `${collectionEndpoint}${encodeURIComponent(rowId)}/?table_name=${encodeURIComponent(table)}`, body: { table_name: table, row }, method });
       candidates.push({ url: `${collectionEndpoint}${encodeURIComponent(rowId)}/`, body: row, method });
     }
