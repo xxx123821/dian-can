@@ -99,6 +99,13 @@ function menuEnabled(value) {
   return !['0', 'false', 'no', 'off', '否', '停用', '下架'].includes(String(value ?? '').trim().toLowerCase());
 }
 
+function dishGroup(value) {
+  const text = clean(value, 40).toLowerCase().replace(/\s+/g, '');
+  if (text === 'mainmeat' || text.includes('主荤') || text.includes('主肉') || text.includes('主菜')) return 'main';
+  if (text === 'sidemeat' || text.includes('副荤') || text.includes('半荤') || text.includes('副菜')) return 'side';
+  return '';
+}
+
 async function readOrderMenu(env) {
   const tableName = clean(env.SEATABLE_MENU_TABLE_NAME, 100);
   if (!tableName) return null;
@@ -120,7 +127,8 @@ async function readOrderMenu(env) {
     if (type === 'dish' || type === '菜品') {
       const name = clean(valueFrom(row, map, 'name', ['菜名', '菜品名称']), 80);
       const group = clean(valueFrom(row, map, 'group', ['分组']), 30);
-      targets(row).forEach((meal) => { if (group === 'mainMeat' || group === '主肉' || group === '主荤') menus[meal].mainMeat.add(name); if (group === 'sideMeat' || group === '半荤' || group === '副荤') menus[meal].sideMeat.add(name); });
+      const groupKind = dishGroup(group);
+      targets(row).forEach((meal) => { if (groupKind === 'main') menus[meal].mainMeat.add(name); if (groupKind === 'side') menus[meal].sideMeat.add(name); });
     }
   });
   const hasMenu = Object.values(menus).some((meal) => meal.packages.length || meal.mainMeat.size || meal.sideMeat.size);

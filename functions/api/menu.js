@@ -94,6 +94,13 @@ function fieldValue(row, names) {
   return first ?? '';
 }
 
+function dishGroup(value) {
+  const text = clean(value, 40).toLowerCase().replace(/\s+/g, '');
+  if (text === 'mainmeat' || text.includes('主荤') || text.includes('主肉') || text.includes('主菜')) return 'main';
+  if (text === 'sidemeat' || text.includes('副荤') || text.includes('半荤') || text.includes('副菜')) return 'side';
+  return '';
+}
+
 function isPublished(row, map) {
   const status = fieldValue(row, [columnName(map, 'published'), 'published', 'publish', '上架', '发布状态']);
   const enabledValue = fieldValue(row, [columnName(map, 'enabled'), 'enabled', 'active', '启用']);
@@ -156,11 +163,12 @@ function buildMenu(rows, map) {
       diagnostics.dishes += 1;
       const name = clean(fieldValue(row, [columnName(map, 'name'), 'name', 'dishName', '菜品名称']), 80);
       const group = clean(fieldValue(row, [columnName(map, 'group'), 'group', 'dishGroup', '分组']), 30);
-      if (!name || (group !== 'mainMeat' && group !== 'sideMeat' && group !== '主肉' && group !== '半荤' && group !== '主荤' && group !== '副荤')) return;
+      const groupKind = dishGroup(group);
+      if (!name || !groupKind) return;
       const item = { name, sort: numberOr(fieldValue(row, [columnName(map, 'sort'), 'sort', '排序']), index) };
       mealTargets(fieldValue(row, [columnName(map, 'mealPeriod'), 'mealPeriod', '餐段'])).forEach((meal) => {
-        if (group === 'mainMeat' || group === '主肉' || group === '主荤') mealMenus[meal].mainMeat.push(item);
-        else mealMenus[meal].sideMeat.push(item);
+        if (groupKind === 'main') mealMenus[meal].mainMeat.push(item);
+        else if (groupKind === 'side') mealMenus[meal].sideMeat.push(item);
       });
       return;
     }
