@@ -20,6 +20,15 @@ const ORDER_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期',
 const STATS_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期', sequenceNo: '序号', mealPeriod: '用餐时段', dishGroup: '分组', dishName: '菜名', quantity: '份数', packageName: '套餐名称', name: '姓名', phone: '电话' };
 function columnName(map, key) { return clean(map[key] || ORDER_DEFAULT_COLUMNS[key] || STATS_DEFAULT_COLUMNS[key] || key, 100) || key; }
 
+function resolveMenuMap(rows, configured = {}) {
+  const map = { ...configured };
+  const sample = rows.find((row) => row && typeof row === 'object' && !Array.isArray(row)) || {};
+  const keys = Object.keys(sample).filter((key) => !key.startsWith('_'));
+  const schema = ['type', 'key', 'name', 'price', 'mainCount', 'sideCount', 'group', 'sort', 'mealPeriod', 'value', 'enabled', 'published'];
+  schema.forEach((key, index) => { if (!map[key] && keys[index]) map[key] = keys[index]; });
+  return map;
+}
+
 async function seaTableFetch(env, tableName, method, row) {
   return seaTableRequest(env, tableName, method, row);
 }
@@ -55,7 +64,7 @@ async function mealSchedule(env) {
   if (!clean(env.SEATABLE_MENU_TABLE_NAME, 100)) return defaults;
   try {
     const data = await seaTableFetch(env, env.SEATABLE_MENU_TABLE_NAME, 'GET');
-    const menuMap = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
+    const menuMap = resolveMenuMap(rowsFromResponse(data), parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'));
     const settings = {};
     rowsFromResponse(data).forEach((row) => {
       const type = clean(row[columnName(menuMap, 'type')] ?? row.type ?? row.itemType ?? row['类型'], 30).toLowerCase();
@@ -109,8 +118,9 @@ function dishGroup(value) {
 async function readOrderMenu(env) {
   const tableName = clean(env.SEATABLE_MENU_TABLE_NAME, 100);
   if (!tableName) return null;
-  const map = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
+  const mapConfig = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
   const rows = rowsFromResponse(await seaTableFetch(env, tableName, 'GET'));
+  const map = resolveMenuMap(rows, mapConfig);
   const menus = { lunch: { packages: [], mainMeat: new Set(), sideMeat: new Set() }, dinner: { packages: [], mainMeat: new Set(), sideMeat: new Set() } };
   const targets = (value) => { const key = clean(valueFrom(value, map, 'mealPeriod', ['餐段']), 20).toLowerCase(); return key === '午餐' || key === 'lunch' ? ['lunch'] : (key === '晚餐' || key === 'dinner' ? ['dinner'] : ['lunch', 'dinner']); };
   rows.forEach((row) => {

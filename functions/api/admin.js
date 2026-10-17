@@ -31,6 +31,14 @@ function resolveMenuMap(rows, configured) {
   const sample = rows.find((row) => row && typeof row === 'object') || {};
   const aliases = { type: ['类型', 'type'], key: ['键', 'key'], name: ['名称', 'name'], price: ['价格', 'price'], mainCount: ['主荤数量', 'mainCount'], sideCount: ['副荤数量', 'sideCount'], group: ['分组', 'group'], sort: ['排序', 'sort'], mealPeriod: ['餐段', 'mealPeriod'], value: ['值', 'value'], enabled: ['启用', 'enabled'], published: ['上架', 'published'] };
   for (const key of Object.keys(MENU_DEFAULT_COLUMNS)) if (!map[key]) map[key] = aliases[key].find((name) => Object.prototype.hasOwnProperty.call(sample, name)) || MENU_DEFAULT_COLUMNS[key];
+  // SeaTable may return internal column IDs instead of visible names. The
+  // menu schema is fixed, so use its documented order for edits in that case.
+  const internalKeys = Object.keys(sample).filter((key) => !key.startsWith('_'));
+  const schema = ['type', 'key', 'name', 'price', 'mainCount', 'sideCount', 'group', 'sort', 'mealPeriod', 'value', 'enabled', 'published'];
+  schema.forEach((key, index) => {
+    const candidate = internalKeys[index];
+    if (candidate && (!Object.prototype.hasOwnProperty.call(sample, map[key]) || map[key] === MENU_DEFAULT_COLUMNS[key])) map[key] = candidate;
+  });
   return map;
 }
 async function seaTable(env, tableName, method = 'GET', row = null, rowId = '') {
