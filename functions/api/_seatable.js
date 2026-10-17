@@ -32,10 +32,13 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   const endpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/${rowPath}?${query}`;
   let response;
   try {
+    const requestBody = method === 'POST'
+      ? { table_name: table, rows: [row] }
+      : { table_name: table, row };
     response = await fetch(endpoint, {
       method,
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: method === 'GET' ? undefined : JSON.stringify({ table_name: table, row }),
+      body: method === 'GET' ? undefined : JSON.stringify(requestBody),
       cache: 'no-store'
     });
   } catch (_) { throw new Error('已连接 SeaTable 鉴权服务，但无法连接 Base 数据接口'); }
