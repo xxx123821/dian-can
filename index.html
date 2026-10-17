@@ -302,6 +302,8 @@
       document.querySelectorAll('[data-package]').forEach((button) => button.addEventListener('click', () => {
         invalidateDraft();
         state.packageKey = button.dataset.package;
+        state.main.clear();
+        state.side.clear();
         renderPackages(); renderDishes(); updateStatus();
       }));
       $('summaryName').textContent = currentPackage().name;
