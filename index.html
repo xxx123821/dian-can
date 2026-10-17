@@ -12,7 +12,9 @@
       // 套餐名称、价格，以及各菜品组必须选择的数量
       packages: {
         A: { name: '套餐A', price: 13, mainCount: 1, sideCount: 2 },
-        B: { name: '套餐B', price: 16, mainCount: 2, sideCount: 1 }
+        B: { name: '套餐B', price: 15, mainCount: 2, sideCount: 1 },
+        C: { name: '套餐C', price: 18, mainCount: 2, sideCount: 2 },
+        D: { name: '减脂餐', price: 15, mainCount: 0, sideCount: 0 }
       },
       // 主荤池、副荤池：直接增删菜名即可（菜名请保持唯一）
       dishes: {
@@ -137,7 +139,7 @@
     <header class="header">
       <h1 id="pageTitle">今日点餐</h1>
       <p id="contactNotice"></p>
-      <p class="rules">套餐价格：<br>【一主荤 + 二个副荤】👉 13元<br>【二主荤 + 一个副荤】👉 16元<span class="soup-in-rules">备注:任意套餐均赠送例汤</span></p>
+      <p class="rules">套餐价格：<br>【一主荤 + 二个副荤】👉 13元<br>【二主荤 + 一个副荤】👉 15元<br>【二主荤 + 二个副荤】👉 18元<br>【减脂餐（每日固定）】👉 15元<span class="soup-in-rules">备注:任意套餐均赠送例汤</span></p>
       <p class="meal-schedule" id="mealScheduleNotice">点餐时段：午餐 00:00 开始，10:30 结束；晚餐 12:00 开始，16:00 结束。</p>
       <p id="deadlineNotice">请选择午餐或晚餐</p>
       <p id="configNotice" style="display:none;color:#a35a00;margin-top:8px">当前是本地预览模式：部署到 Cloudflare Pages 后才能正式提交订单。</p>
@@ -327,7 +329,7 @@
       $('packageTabs').innerHTML = Object.entries(packages).map(([key, item]) => `
         <button type="button" class="package-tab ${key === state.packageKey ? 'active' : ''}" data-package="${escapeHtml(key)}">
           <strong>${escapeHtml(item.name)} · ¥${Number(item.price).toFixed(0)}</strong>
-          <span>${item.mainCount}主荤 + ${item.sideCount}副荤</span>
+          <span>${item.mainCount === 0 && item.sideCount === 0 ? '每日固定，无需选菜' : `${item.mainCount}主荤 + ${item.sideCount}副荤`}</span>
         </button>`).join('');
       document.querySelectorAll('[data-package]').forEach((button) => button.addEventListener('click', () => {
         invalidateDraft();
@@ -363,6 +365,10 @@
       const pkg = currentPackage();
       const dishes = activeMenu().dishes || CONFIG.dishes;
       if (!pkg) { $('mainList').innerHTML = '<div class="hint">当前时段暂无套餐</div>'; $('sideList').innerHTML = ''; return; }
+      const mainGroup = $('mainList').closest('.selection-group');
+      const sideGroup = $('sideList').closest('.selection-group');
+      if (mainGroup) mainGroup.style.display = pkg.mainCount ? '' : 'none';
+      if (sideGroup) sideGroup.style.display = pkg.sideCount ? '' : 'none';
       renderDishList('mainList', dishes.mainMeat || [], state.main, 'main', pkg.mainCount);
       renderDishList('sideList', dishes.sideMeat || [], state.side, 'side', pkg.sideCount);
     }
@@ -434,7 +440,7 @@
       const contact = updateContactStatus();
       const valid = Boolean(currentMeal()) && state.main.size === pkg.mainCount && state.side.size === pkg.sideCount && contact.valid;
       $('validation').className = `validation ${valid ? 'ok' : 'warn'}`;
-      $('validation').textContent = !currentMeal() ? '当前不在开放点餐时间' : (state.main.size !== pkg.mainCount || state.side.size !== pkg.sideCount ? `${mainText}；${sideText}` : (contact.valid ? '选择数量正确，可以提交' : '请先补充联系信息'));
+      $('validation').textContent = !currentMeal() ? '当前不在开放点餐时间' : (pkg.mainCount === 0 && pkg.sideCount === 0 ? (contact.valid ? '每日固定餐，无需选择菜品' : '请先补充联系信息') : (state.main.size !== pkg.mainCount || state.side.size !== pkg.sideCount ? `${mainText}；${sideText}` : (contact.valid ? '选择数量正确，可以提交' : '请先补充联系信息')));
       $('submitBtn').disabled = !valid || isClosed() || state.isSubmitting || state.isLoadingPreview || state.submitted || Boolean(state.draftPayload);
       $('submitBtn').style.display = state.draftPayload ? 'none' : 'block';
       $('confirmBtn').style.display = state.draftPayload ? 'block' : 'none';

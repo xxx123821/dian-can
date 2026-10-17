@@ -225,7 +225,7 @@ export async function onRequestPost({ request, env }) {
     mainMeat: clean(raw.mainMeat, 500), sideMeat: clean(raw.sideMeat, 500),
     name: clean(raw.name, 60), phone: clean(raw.phone, 30), price: Number(raw.price)
   };
-  if (!input.packageName || !input.mealPeriod || !Number.isFinite(input.price) || !input.mainMeat || !input.sideMeat || !input.name || !/^1[3-9]\d{9}$/.test(input.phone)) return json({ ok: false, error: '订单信息不完整或格式不正确' }, 400);
+  if (!input.packageName || !input.mealPeriod || !Number.isFinite(input.price) || !input.name || !/^1[3-9]\d{9}$/.test(input.phone)) return json({ ok: false, error: '订单信息不完整或格式不正确' }, 400);
   try {
     const orderMap = parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP');
     const statsMap = parseMap(env.SEATABLE_STATS_COLUMN_MAP, 'SEATABLE_STATS_COLUMN_MAP');
