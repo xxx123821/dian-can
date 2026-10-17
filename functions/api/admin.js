@@ -70,24 +70,36 @@ function beijingDate() {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 function dateOnly(value) { return String(value || '').slice(0, 10); }
+function isDateKey(value) { return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')); }
+function dateDistance(from, to) {
+  if (!isDateKey(from) || !isDateKey(to)) return NaN;
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+}
+function allowedHistoryDate(value) {
+  const today = beijingDate();
+  const target = isDateKey(value) ? value : today;
+  const age = dateDistance(target, today);
+  if (!Number.isFinite(age) || age < 0 || age > 6) throw Object.assign(new Error('历史记录只保留最近 7 天'), { status: 400 });
+  return target;
+}
 function normalizeSetting(row, map) { return { id: clean(row?._id, 100), key: clean(field(row, columnName(map, 'key'), 'key', '键'), 80), value: clean(field(row, columnName(map, 'value'), 'value', '值'), 500), enabled: enabled(field(row, columnName(map, 'enabled'), 'enabled', '启用')), published: enabled(field(row, columnName(map, 'published'), 'published', '上架')) }; }
 
 async function readMenuRows(env) { return rowsFrom(await seaTable(env, env.SEATABLE_MENU_TABLE_NAME, 'GET')); }
-async function readLive(env) {
+async function readLive(env, requestedDate = '') {
   const orderMap = parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP');
   const statsMap = parseMap(env.SEATABLE_STATS_COLUMN_MAP, 'SEATABLE_STATS_COLUMN_MAP');
-  const today = beijingDate();
-  const orders = rowsFrom(await seaTable(env, env.SEATABLE_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(orderMap, 'orderDate'), 'orderDate', '日期')) === today).map((row) => ({
+  const targetDate = allowedHistoryDate(requestedDate);
+  const orders = rowsFrom(await seaTable(env, env.SEATABLE_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(orderMap, 'orderDate'), 'orderDate', '日期')) === targetDate).map((row) => ({
     orderNo: field(row, columnName(orderMap, 'orderNo'), 'orderNo', '订单号'), sequenceNo: field(row, columnName(orderMap, 'sequenceNo'), 'sequenceNo', '序号', '订单序号'),
     mealPeriod: field(row, columnName(orderMap, 'mealPeriod'), 'mealPeriod', '用餐时段'), packageName: field(row, columnName(orderMap, 'packageName'), 'packageName', '套餐名称'),
     price: field(row, columnName(orderMap, 'price'), 'price', '价格'), mainMeat: field(row, columnName(orderMap, 'mainMeat'), 'mainMeat', '主荤', '主肉'), sideMeat: field(row, columnName(orderMap, 'sideMeat'), 'sideMeat', '副荤', '半荤'),
     name: field(row, columnName(orderMap, 'name'), 'name', '姓名'), phone: field(row, columnName(orderMap, 'phone'), 'phone', '手机号码', '电话')
   }));
-  const statsRows = rowsFrom(await seaTable(env, env.SEATABLE_STATS_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(statsMap, 'orderDate'), 'orderDate', '日期')) === today);
+  const statsRows = rowsFrom(await seaTable(env, env.SEATABLE_STATS_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(statsMap, 'orderDate'), 'orderDate', '日期')) === targetDate);
   const totals = {};
   statsRows.forEach((row) => { const name = clean(field(row, columnName(statsMap, 'dishName'), 'dishName', '菜名', '菜品名称'), 80); if (!name) return; const group = clean(field(row, columnName(statsMap, 'dishGroup'), 'dishGroup', '分组'), 30); totals[`${group}::${name}`] = (totals[`${group}::${name}`] || 0) + numberOr(field(row, columnName(statsMap, 'quantity'), 'quantity', '份数'), 1); });
   const stats = Object.entries(totals).map(([key, quantity]) => { const [group, dishName] = key.split('::'); return { group, dishName, quantity }; }).sort((a, b) => a.group.localeCompare(b.group) || a.dishName.localeCompare(b.dishName));
-  return { date: today, orders, stats };
+  return { date: targetDate, orders, stats, historyRetentionDays: 7 };
 }
 
 function normalizeMenu(rows, map) {
@@ -125,7 +137,7 @@ export async function onRequest(context) {
     assertAdmin(context.request, context.env);
     if (context.request.method === 'GET') {
       const url = new URL(context.request.url);
-      if (url.searchParams.get('section') === 'live') return json({ ok: true, ...(await readLive(context.env)) });
+      if (url.searchParams.get('section') === 'live' || url.searchParams.get('section') === 'history') return json({ ok: true, ...(await readLive(context.env, url.searchParams.get('date') || '')) });
       const map = parseMap(context.env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
       return json({ ok: true, menu: normalizeMenu(await readMenuRows(context.env), map), ...(await readLive(context.env)) });
     }
