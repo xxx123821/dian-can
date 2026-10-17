@@ -41,7 +41,7 @@ function timeMinutes(value) {
 }
 
 function defaultMealSchedule() {
-  return { lunch: { label: '午餐', start: '00:00', end: '10:30' }, dinner: { label: '晚餐', start: '12:00', end: '16:00' } };
+  return { lunch: { label: '午餐', start: '00:00', end: '23:59' }, dinner: { label: '晚餐', start: '00:00', end: '23:59' } };
 }
 
 async function mealSchedule(env) {
@@ -80,12 +80,24 @@ function assertMealOpen(schedule, period, nowMinutes) {
 
 function rowsFromResponse(data) { return Array.isArray(data) ? data : (Array.isArray(data?.rows) ? data.rows : []); }
 function valueFrom(row, map, key, aliases = []) {
-  for (const name of [columnName(map, key), key, ...aliases]) if (row?.[name] !== undefined && row?.[name] !== null) return row[name];
-  return '';
+  let first;
+  for (const name of [columnName(map, key), key, ...aliases]) {
+    if (row?.[name] === undefined || row?.[name] === null) continue;
+    if (first === undefined) first = row[name];
+    if (typeof row[name] !== 'string' || row[name].trim() !== '') return row[name];
+  }
+  return first ?? '';
 }
 function dateOnly(value) { return String(value || '').slice(0, 10); }
 
-const menuEnabled = (value) => !['0', 'false', 'no', 'off', '否', '停用', '下架'].includes(String(value ?? '').trim().toLowerCase());
+function menuEnabled(value) {
+  if (value && typeof value === 'object') {
+    if (Object.prototype.hasOwnProperty.call(value, 'is_checked')) return menuEnabled(value.is_checked);
+    if (Object.prototype.hasOwnProperty.call(value, 'checked')) return menuEnabled(value.checked);
+    if (Object.prototype.hasOwnProperty.call(value, 'value')) return menuEnabled(value.value);
+  }
+  return !['0', 'false', 'no', 'off', '否', '停用', '下架'].includes(String(value ?? '').trim().toLowerCase());
+}
 
 async function readOrderMenu(env) {
   const tableName = clean(env.SEATABLE_MENU_TABLE_NAME, 100);
@@ -111,6 +123,10 @@ async function readOrderMenu(env) {
       targets(row).forEach((meal) => { if (group === 'mainMeat' || group === '主肉' || group === '主荤') menus[meal].mainMeat.add(name); if (group === 'sideMeat' || group === '半荤' || group === '副荤') menus[meal].sideMeat.add(name); });
     }
   });
+  const hasMenu = Object.values(menus).some((meal) => meal.packages.length || meal.mainMeat.size || meal.sideMeat.size);
+  // An empty table should not make every locally displayed order impossible
+  // to submit. Normal validation resumes automatically once menu rows exist.
+  if (!hasMenu) return null;
   return menus;
 }
 

@@ -38,11 +38,32 @@ const field = (row, ...names) => {
   return '';
 };
 
-const enabled = (value) => !['0', 'false', 'no', 'off', '否', '停用', '下架'].includes(String(value ?? '').trim().toLowerCase());
+function enabled(value) {
+  // SeaTable checkbox values can be booleans, 0/1, strings, or (depending
+  // on the API version) a small object containing the checked value.
+  if (value && typeof value === 'object') {
+    if (Object.prototype.hasOwnProperty.call(value, 'is_checked')) return enabled(value.is_checked);
+    if (Object.prototype.hasOwnProperty.call(value, 'checked')) return enabled(value.checked);
+    if (Object.prototype.hasOwnProperty.call(value, 'value')) return enabled(value.value);
+  }
+  return !['0', 'false', 'no', 'off', '否', '停用', '下架'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+function fieldValue(row, names) {
+  let first;
+  for (const name of names) {
+    if (!row || row[name] === undefined || row[name] === null) continue;
+    if (first === undefined) first = row[name];
+    // Prefer a non-empty alias when a stale/hidden column with the same
+    // semantic name is present in the returned row.
+    if (typeof row[name] !== 'string' || row[name].trim() !== '') return row[name];
+  }
+  return first ?? '';
+}
 
 function isPublished(row, map) {
-  const status = field(row, columnName(map, 'published'), 'published', 'publish', '上架', '发布状态');
-  const enabledValue = field(row, columnName(map, 'enabled'), 'enabled', 'active', '启用');
+  const status = fieldValue(row, [columnName(map, 'published'), 'published', 'publish', '上架', '发布状态']);
+  const enabledValue = fieldValue(row, [columnName(map, 'enabled'), 'enabled', 'active', '启用']);
   return enabled(status) && enabled(enabledValue);
 }
 
@@ -69,34 +90,36 @@ function buildMenu(rows, map) {
   };
 
   rows.forEach((row, index) => {
-    const type = clean(field(row, columnName(map, 'type'), 'type', 'itemType', '类型'), 30).toLowerCase();
-    if (!isPublished(row, map)) return;
+    const type = clean(fieldValue(row, [columnName(map, 'type'), 'type', 'itemType', '类型']), 30).toLowerCase();
     if (type === 'setting' || type === '设置') {
-      const key = clean(field(row, columnName(map, 'key'), 'key', 'settingKey', '键'), 80);
-      const value = clean(field(row, columnName(map, 'value'), 'value', 'settingValue', '值'), 500);
+      // Settings (contact and schedule) are configuration, not menu items;
+      // do not hide them just because an old row has an unchecked status.
+      const key = clean(fieldValue(row, [columnName(map, 'key'), 'key', 'settingKey', '键']), 80);
+      const value = clean(fieldValue(row, [columnName(map, 'value'), 'value', 'settingValue', '值']), 500);
       // Keep a valid value when old failed saves left duplicate setting rows.
       if (key && (value || !settings[key])) settings[key] = value;
       return;
     }
+    if (!isPublished(row, map)) return;
     if (type === 'package' || type === '套餐') {
-      const key = clean(field(row, columnName(map, 'key'), 'key', 'packageKey', '套餐键'), 20);
-      const name = clean(field(row, columnName(map, 'name'), 'name', 'packageName', '套餐名称'), 60);
+      const key = clean(fieldValue(row, [columnName(map, 'key'), 'key', 'packageKey', '套餐键']), 20);
+      const name = clean(fieldValue(row, [columnName(map, 'name'), 'name', 'packageName', '套餐名称']), 60);
       if (!key || !name) return;
       const item = {
         name,
-        price: numberOr(field(row, columnName(map, 'price'), 'price', '价格'), 0),
-        mainCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'mainCount'), 'mainCount', '主荤数量', '主肉数量'), 0))),
-        sideCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'sideCount'), 'sideCount', '副荤数量', '半荤数量'), 0)))
+        price: numberOr(fieldValue(row, [columnName(map, 'price'), 'price', '价格']), 0),
+        mainCount: Math.max(0, Math.floor(numberOr(fieldValue(row, [columnName(map, 'mainCount'), 'mainCount', '主荤数量', '主肉数量']), 0))),
+        sideCount: Math.max(0, Math.floor(numberOr(fieldValue(row, [columnName(map, 'sideCount'), 'sideCount', '副荤数量', '半荤数量']), 0)))
       };
-      mealTargets(field(row, columnName(map, 'mealPeriod'), 'mealPeriod', '餐段')).forEach((meal) => { mealMenus[meal].packages[key] = item; });
+      mealTargets(fieldValue(row, [columnName(map, 'mealPeriod'), 'mealPeriod', '餐段'])).forEach((meal) => { mealMenus[meal].packages[key] = item; });
       return;
     }
     if (type === 'dish' || type === '菜品') {
-      const name = clean(field(row, columnName(map, 'name'), 'name', 'dishName', '菜品名称'), 80);
-      const group = clean(field(row, columnName(map, 'group'), 'group', 'dishGroup', '分组'), 30);
+      const name = clean(fieldValue(row, [columnName(map, 'name'), 'name', 'dishName', '菜品名称']), 80);
+      const group = clean(fieldValue(row, [columnName(map, 'group'), 'group', 'dishGroup', '分组']), 30);
       if (!name || (group !== 'mainMeat' && group !== 'sideMeat' && group !== '主肉' && group !== '半荤' && group !== '主荤' && group !== '副荤')) return;
-      const item = { name, sort: numberOr(field(row, columnName(map, 'sort'), 'sort', '排序'), index) };
-      mealTargets(field(row, columnName(map, 'mealPeriod'), 'mealPeriod', '餐段')).forEach((meal) => {
+      const item = { name, sort: numberOr(fieldValue(row, [columnName(map, 'sort'), 'sort', '排序']), index) };
+      mealTargets(fieldValue(row, [columnName(map, 'mealPeriod'), 'mealPeriod', '餐段'])).forEach((meal) => {
         if (group === 'mainMeat' || group === '主肉' || group === '主荤') mealMenus[meal].mainMeat.push(item);
         else mealMenus[meal].sideMeat.push(item);
       });
@@ -110,8 +133,10 @@ function buildMenu(rows, map) {
     dishes: fallback.dishes,
     mealMenus,
     mealSchedule: {
-      lunch: { label: '午餐', start: settings.lunchStart || '00:00', end: settings.lunchEnd || '10:30' },
-      dinner: { label: '晚餐', start: settings.dinnerStart || '12:00', end: settings.dinnerEnd || '16:00' }
+      // If no setting row exists yet, keep the page usable all day. Once the
+      // merchant saves a schedule, these values are replaced by that setting.
+      lunch: { label: '午餐', start: settings.lunchStart || '00:00', end: settings.lunchEnd || '23:59' },
+      dinner: { label: '晚餐', start: settings.dinnerStart || '00:00', end: settings.dinnerEnd || '23:59' }
     },
     contactName: settings.contactName || '',
     contactPhone: settings.contactPhone || '',

@@ -19,10 +19,10 @@
         mainMeat: ['红烧肉', '香辣鸡腿', '梅菜扣肉', '卤鸡翅'],
         sideMeat: ['鱼香茄子', '青椒肉丝', '土豆炖鸡', '番茄炒蛋', '家常豆腐']
       },
-      // 时间均按北京时间。午餐 10:30 截止；晚餐 12:00 开放、16:00 截止。
+      // 时间均按北京时间；商家尚未保存设置时，先默认全天可点。
       mealSchedule: {
-        lunch: { label: '午餐', start: '00:00', end: '10:30' },
-        dinner: { label: '晚餐', start: '12:00', end: '16:00' }
+        lunch: { label: '午餐', start: '00:00', end: '23:59' },
+        dinner: { label: '晚餐', start: '00:00', end: '23:59' }
       },
       contactName: '李明更',
       contactPhone: '18201531980',
@@ -559,6 +559,12 @@
       if (!menu || typeof menu !== 'object') throw new Error('菜单数据格式错误');
       if ((!menu.mealMenus && (!menu.packages || typeof menu.packages !== 'object'))) throw new Error('菜单数据中套餐格式错误');
       if ((!menu.mealMenus && (!menu.dishes || !Array.isArray(menu.dishes.mainMeat) || !Array.isArray(menu.dishes.sideMeat)))) throw new Error('菜单数据中菜品格式错误');
+      const mealMenus = menu.mealMenus || {};
+      const hasPackages = Object.keys(menu.packages || {}).length || Object.values(mealMenus).some((item) => Object.keys(item?.packages || {}).length);
+      const hasDishes = (menu.dishes?.mainMeat?.length || menu.dishes?.sideMeat?.length) || Object.values(mealMenus).some((item) => item?.dishes?.mainMeat?.length || item?.dishes?.sideMeat?.length);
+      // Do not replace the working local menu with an empty response. This
+      // keeps ordering usable during a temporary SeaTable/API outage.
+      if (!hasPackages || !hasDishes) throw new Error(menu.menuWarning || '在线菜单暂时为空');
       CONFIG.packages = menu.packages || {};
       CONFIG.dishes = menu.dishes || { mainMeat: [], sideMeat: [] };
       CONFIG.mealMenus = menu.mealMenus || null;
