@@ -135,7 +135,7 @@
 <body>
   <main class="page">
     <header class="header">
-      <h1>今日点餐</h1>
+      <h1 id="pageTitle">今日点餐</h1>
       <p id="contactNotice"></p>
       <p class="rules">套餐价格：<br>【一主荤 + 二个副荤】👉 13元<br>【二主荤 + 一个副荤】👉 16元<span class="soup-in-rules">备注:任意套餐均赠送例汤</span></p>
       <p class="meal-schedule" id="mealScheduleNotice">点餐时段：午餐 00:00 开始，10:30 结束；晚餐 12:00 开始，16:00 结束。</p>
@@ -256,6 +256,19 @@
     function beijingMinutes() {
       const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
       return Number(parts.find((part) => part.type === 'hour')?.value || 0) * 60 + Number(parts.find((part) => part.type === 'minute')?.value || 0);
+    }
+
+    function renderTodayTitle() {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).formatToParts(new Date());
+      const get = (type) => parts.find((part) => part.type === type)?.value || '';
+      const title = `今日点餐（${get('year')}年${get('month')}月${get('day')}日）`;
+      $('pageTitle').textContent = title;
+      document.title = title;
     }
 
     function mealSchedule() { return CONFIG.mealSchedule || {}; }
@@ -681,6 +694,7 @@
       $('customerName').value = ''; $('customerPhone').value = ''; updateStatus(); $('customerName').focus();
     });
     async function initialize() {
+      renderTodayTitle();
       loadCustomerInfo();
       $('configNotice').style.display = location.protocol === 'file:' ? 'block' : 'none';
       await loadRemoteMenu();
@@ -691,6 +705,7 @@
       $('mealScheduleNotice').textContent = `点餐时段：${lunch.label} ${lunch.start} 开始，${lunch.end} 结束；${dinner.label} ${dinner.start} 开始，${dinner.end} 结束。`;
       renderPackages(); renderDishes(); updateStatus(); refreshDeadline();
       window.setInterval(refreshDeadline, 1000);
+      window.setInterval(renderTodayTitle, 60000);
     }
     initialize();
   </script>
