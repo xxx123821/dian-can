@@ -260,7 +260,14 @@
     function renderMealTabs() {
       const available = availableMeals();
       const scheduleEntries = Object.entries(mealSchedule()).map(([key, item]) => ({ key, ...item }));
+      const previousMeal = state.mealPeriod;
       if (!available.some((item) => item.key === state.mealPeriod)) state.mealPeriod = available[0]?.key || '';
+      if (previousMeal !== state.mealPeriod && $('packageTabs')) {
+        const packages = activeMenu().packages || {};
+        state.packageKey = packages[state.packageKey] ? state.packageKey : (Object.keys(packages)[0] || '');
+        state.main.clear(); state.side.clear();
+        renderPackages(); renderDishes();
+      }
       const availableKeys = new Set(available.map((item) => item.key));
       $('mealTabs').innerHTML = scheduleEntries.length ? scheduleEntries.map((item) => {
         const isAvailable = availableKeys.has(item.key);
