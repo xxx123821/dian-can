@@ -20,14 +20,11 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   const tokenText = await tokenResponse.text();
   let tokenData = {};
   try { tokenData = tokenText ? JSON.parse(tokenText) : {}; } catch (_) { }
-  if (!tokenResponse.ok) {
-    const detail = clean(tokenData.error || tokenData.error_msg || tokenData.message || tokenData.detail, 240);
-    const hint = `SeaTable API Token 换取 Base Token 请求失败（HTTP ${tokenResponse.status}）`;
-    throw new Error(detail ? `${hint}：${detail}` : hint);
-  }
-
-  const accessToken = clean(tokenData.access_token, 2000);
-  if (!accessToken) throw new Error('SeaTable 鉴权成功但未返回 Base Token；请确认填写的是 API Token，而非表单分享链接或普通账号令牌');
+  // SeaTable installations expose two similar credentials in different places:
+  // a base-scoped API token (already usable as Bearer on the Base API), and an
+  // account API token (must first be exchanged for a Base Token). Support both.
+  let accessToken = tokenResponse.ok ? clean(tokenData.access_token, 2000) : '';
+  if (!accessToken) accessToken = apiToken;
 
   const query = new URLSearchParams({ table_name: table });
   if (method === 'GET') query.set('limit', '1000');
@@ -47,7 +44,9 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
     let detail = '';
     try { const data = JSON.parse(text); detail = clean(data.error || data.error_msg || data.message || data.detail, 240); } catch (_) { }
     if (response.status === 401 || response.status === 403) {
-      throw new Error(`SeaTable 拒绝访问表“${table}”（HTTP ${response.status}）。请确认 Base Token 对该 Base 有读写权限、Base UUID 正确，并且表名完全匹配${detail ? `：${detail}` : ''}`);
+      const tokenDetail = !tokenResponse.ok ? clean(tokenData.error || tokenData.error_msg || tokenData.message || tokenData.detail, 160) : '';
+      const exchange = !tokenResponse.ok ? `（API Token 换取 Base Token 也返回 HTTP ${tokenResponse.status}${tokenDetail ? `：${tokenDetail}` : ''}）` : '';
+      throw new Error(`SeaTable 拒绝访问表“${table}”（HTTP ${response.status}）。请确认此令牌属于该 Base、UUID 正确、令牌仍有效且有读写权限，表名完全匹配${detail ? `：${detail}` : ''}${exchange}`);
     }
     throw new Error(detail ? `SeaTable 请求失败：${detail}` : `SeaTable 请求失败（HTTP ${response.status}）`);
   }
