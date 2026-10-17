@@ -7,16 +7,29 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   const table = clean(tableName, 100);
   if (!baseUuid || !apiToken) throw new Error('服务端尚未配置 SeaTable 表格 UUID 或 API Token');
   if (!table) throw new Error('未配置 SeaTable 表名');
-  const origin = String(env.SEATABLE_API_ORIGIN || 'https://cloud.seatable.cn').replace(/\/$/, '');
+  const configuredOrigin = String(env.SEATABLE_API_ORIGIN || '').trim().replace(/\/$/, '');
+  const origins = [...new Set([configuredOrigin, 'https://cloud.seatable.cn'].filter(Boolean))];
 
   let tokenResponse;
-  try {
-    tokenResponse = await fetch(`${origin}/api/v2.1/dtable/app-access-token/`, {
-      // SeaTable's "Get Base-Token with API-Token" endpoint requires Bearer auth.
-      headers: { Authorization: `Bearer ${apiToken}` },
-      cache: 'no-store'
-    });
-  } catch (_) { throw new Error('无法连接 SeaTable 鉴权接口，请检查 SEATABLE_API_ORIGIN'); }
+  let origin = origins[0];
+  for (const candidate of origins) {
+    try {
+      const response = await fetch(`${candidate}/api/v2.1/dtable/app-access-token/`, {
+        // SeaTable's "Get Base-Token with API-Token" endpoint requires Bearer auth.
+        headers: { Authorization: `Bearer ${apiToken}` },
+        cache: 'no-store'
+      });
+      tokenResponse = response;
+      origin = candidate;
+      break;
+    } catch (_) {
+      // A stale SEATABLE_API_ORIGIN should not prevent the built-in official
+      // endpoint from being tried next.
+    }
+  }
+  // If both auth requests were temporarily unreachable, still try the Base
+  // API with the configured token; base-scoped tokens do not need exchange.
+  if (!tokenResponse) tokenResponse = { ok: false, status: 0, text: async () => '' };
   const tokenText = await tokenResponse.text();
   let tokenData = {};
   try { tokenData = tokenText ? JSON.parse(tokenText) : {}; } catch (_) { }
