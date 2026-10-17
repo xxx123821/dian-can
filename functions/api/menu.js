@@ -76,10 +76,14 @@ async function readRows(env) {
 }
 
 function buildMenu(rows, map) {
-  const packages = {};
-  const mainMeat = [];
-  const sideMeat = [];
+  const mealMenus = { lunch: { packages: {}, mainMeat: [], sideMeat: [] }, dinner: { packages: {}, mainMeat: [], sideMeat: [] } };
   const settings = {};
+  const mealTargets = (value) => {
+    const key = clean(value, 20).toLowerCase();
+    if (key === 'lunch' || key === '午餐') return ['lunch'];
+    if (key === 'dinner' || key === '晚餐') return ['dinner'];
+    return ['lunch', 'dinner'];
+  };
 
   rows.forEach((row, index) => {
     const type = clean(field(row, columnName(map, 'type'), 'type', 'itemType', '类型'), 30).toLowerCase();
@@ -93,12 +97,13 @@ function buildMenu(rows, map) {
       const key = clean(field(row, columnName(map, 'key'), 'key', 'packageKey', '套餐键'), 20);
       const name = clean(field(row, columnName(map, 'name'), 'name', 'packageName', '套餐名称'), 60);
       if (!key || !name) return;
-      packages[key] = {
+      const item = {
         name,
         price: numberOr(field(row, columnName(map, 'price'), 'price', '价格'), 0),
         mainCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'mainCount'), 'mainCount', '主荤数量', '主肉数量'), 0))),
         sideCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'sideCount'), 'sideCount', '副荤数量', '半荤数量'), 0)))
       };
+      mealTargets(field(row, columnName(map, 'mealPeriod'), 'mealPeriod', '餐段')).forEach((meal) => { mealMenus[meal].packages[key] = item; });
       return;
     }
     if (type === 'dish' || type === '菜品') {
@@ -106,16 +111,19 @@ function buildMenu(rows, map) {
       const group = clean(field(row, columnName(map, 'group'), 'group', 'dishGroup', '分组'), 30);
       if (!name || (group !== 'mainMeat' && group !== 'sideMeat' && group !== '主肉' && group !== '半荤' && group !== '主荤' && group !== '副荤')) return;
       const item = { name, sort: numberOr(field(row, columnName(map, 'sort'), 'sort', '排序'), index) };
-      if (group === 'mainMeat' || group === '主肉' || group === '主荤') mainMeat.push(item);
-      else sideMeat.push(item);
+      mealTargets(field(row, columnName(map, 'mealPeriod'), 'mealPeriod', '餐段')).forEach((meal) => {
+        if (group === 'mainMeat' || group === '主肉' || group === '主荤') mealMenus[meal].mainMeat.push(item);
+        else mealMenus[meal].sideMeat.push(item);
+      });
     }
   });
 
-  mainMeat.sort((a, b) => a.sort - b.sort);
-  sideMeat.sort((a, b) => a.sort - b.sort);
+  Object.values(mealMenus).forEach((meal) => { meal.mainMeat.sort((a, b) => a.sort - b.sort); meal.sideMeat.sort((a, b) => a.sort - b.sort); meal.dishes = { mainMeat: meal.mainMeat.map((item) => item.name), sideMeat: meal.sideMeat.map((item) => item.name) }; delete meal.mainMeat; delete meal.sideMeat; });
+  const fallback = mealMenus.lunch;
   const result = {
-    packages,
-    dishes: { mainMeat: mainMeat.map((item) => item.name), sideMeat: sideMeat.map((item) => item.name) },
+    packages: fallback.packages,
+    dishes: fallback.dishes,
+    mealMenus,
     mealSchedule: {
       lunch: { label: '午餐', start: settings.lunchStart || '00:00', end: settings.lunchEnd || '10:30' },
       dinner: { label: '晚餐', start: settings.dinnerStart || '12:00', end: settings.dinnerEnd || '16:00' }
@@ -127,8 +135,8 @@ function buildMenu(rows, map) {
     orderingNotice: settings.orderingNotice || '',
     orderDeadline: settings.orderDeadline || null
   };
-  if (!Object.keys(packages).length) throw new Error('菜单表中没有启用的套餐');
-  if (!mainMeat.length || !sideMeat.length) throw new Error('菜单表中没有启用的菜品');
+  if (!Object.keys(mealMenus.lunch.packages).length && !Object.keys(mealMenus.dinner.packages).length) throw new Error('菜单表中没有启用的套餐');
+  if ((!mealMenus.lunch.dishes.mainMeat.length || !mealMenus.lunch.dishes.sideMeat.length) && (!mealMenus.dinner.dishes.mainMeat.length || !mealMenus.dinner.dishes.sideMeat.length)) throw new Error('菜单表中没有启用的菜品');
   return result;
 }
 

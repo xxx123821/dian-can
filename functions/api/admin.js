@@ -21,14 +21,14 @@ function parseMap(raw, label) {
     return value;
   } catch (_) { throw new Error(`${label} 必须是有效 JSON 对象`); }
 }
-const MENU_DEFAULT_COLUMNS = { type: '类型', key: '键', name: '名称', price: '价格', mainCount: '主荤数量', sideCount: '副荤数量', group: '分组', sort: '排序', value: '值', enabled: '启用', published: '上架' };
+const MENU_DEFAULT_COLUMNS = { type: '类型', key: '键', name: '名称', price: '价格', mainCount: '主荤数量', sideCount: '副荤数量', group: '分组', sort: '排序', mealPeriod: '餐段', value: '值', enabled: '启用', published: '上架' };
 const ORDER_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期', sequenceNo: '序号', mealPeriod: '用餐时段', packageName: '套餐名称', price: '价格', mainMeat: '主荤', sideMeat: '副荤', name: '姓名', phone: '电话' };
 const STATS_DEFAULT_COLUMNS = { orderDate: '订单日期', dishGroup: '分组', dishName: '菜名', quantity: '份数' };
 function columnName(map, key) { return clean(map[key] || MENU_DEFAULT_COLUMNS[key] || key, 100) || key; }
 function resolveMenuMap(rows, configured) {
   const map = { ...configured };
   const sample = rows.find((row) => row && typeof row === 'object') || {};
-  const aliases = { type: ['类型', 'type'], key: ['键', 'key'], name: ['名称', 'name'], price: ['价格', 'price'], mainCount: ['主荤数量', 'mainCount'], sideCount: ['副荤数量', 'sideCount'], group: ['分组', 'group'], sort: ['排序', 'sort'], value: ['值', 'value'], enabled: ['启用', 'enabled'], published: ['上架', 'published'] };
+  const aliases = { type: ['类型', 'type'], key: ['键', 'key'], name: ['名称', 'name'], price: ['价格', 'price'], mainCount: ['主荤数量', 'mainCount'], sideCount: ['副荤数量', 'sideCount'], group: ['分组', 'group'], sort: ['排序', 'sort'], mealPeriod: ['餐段', 'mealPeriod'], value: ['值', 'value'], enabled: ['启用', 'enabled'], published: ['上架', 'published'] };
   for (const key of Object.keys(MENU_DEFAULT_COLUMNS)) if (!map[key]) map[key] = aliases[key].find((name) => Object.prototype.hasOwnProperty.call(sample, name)) || MENU_DEFAULT_COLUMNS[key];
   return map;
 }
@@ -111,14 +111,15 @@ function normalizeMenu(rows, map) {
     const type = clean(field(row, columnName(map, 'type'), 'type', '类型', 'itemType'), 30).toLowerCase();
     const common = { id: clean(row?._id, 100), enabled: enabled(field(row, columnName(map, 'enabled'), 'enabled', '启用')), published: enabled(field(row, columnName(map, 'published'), 'published', '上架')) };
     if (type === 'setting' || type === '设置') { const item = normalizeSetting(row, map); if (item.key) settings[item.key] = item; return; }
-    if (type === 'package' || type === '套餐') { packages.push({ ...common, type: 'package', key: clean(field(row, columnName(map, 'key'), 'key', '套餐键'), 20), name: clean(field(row, columnName(map, 'name'), 'name', '套餐名称'), 60), price: numberOr(field(row, columnName(map, 'price'), 'price', '价格')), mainCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'mainCount'), 'mainCount', '主荤数量', '主肉数量')))), sideCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'sideCount'), 'sideCount', '副荤数量', '半荤数量')))) }); return; }
-    if (type === 'dish' || type === '菜品') { dishes.push({ ...common, type: 'dish', key: clean(field(row, columnName(map, 'key'), 'key', '菜品键'), 60) || `dish-${index + 1}`, name: clean(field(row, columnName(map, 'name'), 'name', '菜名', '菜品名称'), 80), group: clean(field(row, columnName(map, 'group'), 'group', '分组'), 30), sort: numberOr(field(row, columnName(map, 'sort'), 'sort', '排序'), index) }); }
+    const mealPeriod = clean(field(row, columnName(map, 'mealPeriod'), 'mealPeriod', '餐段'), 20) || '全部';
+    if (type === 'package' || type === '套餐') { packages.push({ ...common, type: 'package', mealPeriod, key: clean(field(row, columnName(map, 'key'), 'key', '套餐键'), 20), name: clean(field(row, columnName(map, 'name'), 'name', '套餐名称'), 60), price: numberOr(field(row, columnName(map, 'price'), 'price', '价格')), mainCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'mainCount'), 'mainCount', '主荤数量', '主肉数量')))), sideCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'sideCount'), 'sideCount', '副荤数量', '半荤数量')))) }); return; }
+    if (type === 'dish' || type === '菜品') { dishes.push({ ...common, type: 'dish', mealPeriod, key: clean(field(row, columnName(map, 'key'), 'key', '菜品键'), 60) || `dish-${index + 1}`, name: clean(field(row, columnName(map, 'name'), 'name', '菜名', '菜品名称'), 80), group: clean(field(row, columnName(map, 'group'), 'group', '分组'), 30), sort: numberOr(field(row, columnName(map, 'sort'), 'sort', '排序'), index) }); }
   });
   packages.sort((a, b) => a.key.localeCompare(b.key)); dishes.sort((a, b) => a.sort - b.sort); return { packages, dishes, settings };
 }
 function rowForItem(item, map) {
   const typeLabel = item.type === 'package' ? '套餐' : '菜品';
-  const row = { [columnName(map, 'type')]: typeLabel, [columnName(map, 'key')]: clean(item.key, 80), [columnName(map, 'name')]: clean(item.name, 100), [columnName(map, 'enabled')]: Boolean(item.enabled), [columnName(map, 'published')]: Boolean(item.published) };
+  const row = { [columnName(map, 'type')]: typeLabel, [columnName(map, 'key')]: clean(item.key, 80), [columnName(map, 'name')]: clean(item.name, 100), [columnName(map, 'mealPeriod')]: clean(item.mealPeriod, 20) || '全部', [columnName(map, 'enabled')]: Boolean(item.enabled), [columnName(map, 'published')]: Boolean(item.published) };
   if (item.type === 'package') Object.assign(row, { [columnName(map, 'price')]: numberOr(item.price), [columnName(map, 'mainCount')]: Math.max(0, Math.floor(numberOr(item.mainCount))), [columnName(map, 'sideCount')]: Math.max(0, Math.floor(numberOr(item.sideCount))) });
   if (item.type === 'dish') Object.assign(row, { [columnName(map, 'group')]: clean(item.group, 30), [columnName(map, 'sort')]: numberOr(item.sort) });
   return row;

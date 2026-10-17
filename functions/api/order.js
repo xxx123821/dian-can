@@ -123,35 +123,36 @@ async function readOrderMenu(env) {
   if (!tableName) return null;
   const map = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
   const rows = rowsFromResponse(await seaTableFetch(env, tableName, 'GET'));
-  const packages = []; const mainMeat = new Set(); const sideMeat = new Set();
+  const menus = { lunch: { packages: [], mainMeat: new Set(), sideMeat: new Set() }, dinner: { packages: [], mainMeat: new Set(), sideMeat: new Set() } };
+  const targets = (value) => { const key = clean(valueFrom(value, map, 'mealPeriod', ['餐段']), 20).toLowerCase(); return key === '午餐' || key === 'lunch' ? ['lunch'] : (key === '晚餐' || key === 'dinner' ? ['dinner'] : ['lunch', 'dinner']); };
   rows.forEach((row) => {
     const type = clean(valueFrom(row, map, 'type', ['类型', 'itemType']), 30).toLowerCase();
     const published = menuEnabled(valueFrom(row, map, 'published', ['上架', '发布状态']));
     const active = menuEnabled(valueFrom(row, map, 'enabled', ['启用', 'active']));
     if (!published || !active) return;
-    if (type === 'package' || type === '套餐') packages.push({
+    if (type === 'package' || type === '套餐') targets(row).forEach((meal) => menus[meal].packages.push({
       name: clean(valueFrom(row, map, 'name', ['套餐名称', 'packageName']), 60),
       price: Number(valueFrom(row, map, 'price', ['价格'])),
       mainCount: Math.max(0, Math.floor(Number(valueFrom(row, map, 'mainCount', ['主荤数量', '主肉数量'])) || 0)),
       sideCount: Math.max(0, Math.floor(Number(valueFrom(row, map, 'sideCount', ['副荤数量', '半荤数量'])) || 0))
-    });
+    }));
     if (type === 'dish' || type === '菜品') {
       const name = clean(valueFrom(row, map, 'name', ['菜名', '菜品名称']), 80);
       const group = clean(valueFrom(row, map, 'group', ['分组']), 30);
-      if (group === 'mainMeat' || group === '主肉' || group === '主荤') mainMeat.add(name);
-      if (group === 'sideMeat' || group === '半荤' || group === '副荤') sideMeat.add(name);
+      targets(row).forEach((meal) => { if (group === 'mainMeat' || group === '主肉' || group === '主荤') menus[meal].mainMeat.add(name); if (group === 'sideMeat' || group === '半荤' || group === '副荤') menus[meal].sideMeat.add(name); });
     }
   });
-  return { packages, mainMeat, sideMeat };
+  return menus;
 }
 
 function validateOrderAgainstMenu(input, menu) {
   if (!menu) return;
-  const selectedPackage = menu.packages.find((item) => item.name === input.packageName);
+  const scoped = menu[input.mealPeriod] || menu.lunch;
+  const selectedPackage = scoped.packages.find((item) => item.name === input.packageName);
   if (!selectedPackage || !Number.isFinite(selectedPackage.price)) { const error = new Error('套餐已更新，请刷新页面后重新点餐'); error.status = 400; throw error; }
   const main = input.mainMeat.split('、').map((item) => item.trim()).filter(Boolean);
   const side = input.sideMeat.split('、').map((item) => item.trim()).filter(Boolean);
-  if (main.length !== selectedPackage.mainCount || side.length !== selectedPackage.sideCount || main.some((item) => !menu.mainMeat.has(item)) || side.some((item) => !menu.sideMeat.has(item))) { const error = new Error('套餐或菜品已更新，请刷新页面后重新点餐'); error.status = 400; throw error; }
+  if (main.length !== selectedPackage.mainCount || side.length !== selectedPackage.sideCount || main.some((item) => !scoped.mainMeat.has(item)) || side.some((item) => !scoped.sideMeat.has(item))) { const error = new Error('套餐或菜品已更新，请刷新页面后重新点餐'); error.status = 400; throw error; }
   input.price = selectedPackage.price;
 }
 
