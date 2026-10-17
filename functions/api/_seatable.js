@@ -27,14 +27,21 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   if (!accessToken) accessToken = apiToken;
 
   const query = new URLSearchParams({ table_name: table });
-  if (method === 'GET') query.set('limit', '1000');
-  const rowPath = rowId ? `${encodeURIComponent(rowId)}/` : '';
-  const endpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/${rowPath}?${query}`;
+  if (method === 'GET') {
+    query.set('limit', '1000');
+    query.set('convert_keys', 'true');
+  }
+  // SeaTable's API-gateway uses the collection endpoint for both appending
+  // and updating rows. Updates carry row_id inside an `updates` array; a
+  // row-id URL (the older Base API form) returns HTTP 405 on cloud.seatable.cn.
+  const endpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/?${query}`;
+  const requestBody = method === 'POST'
+    ? { table_name: table, rows: [row] }
+    : method === 'PUT'
+      ? { table_name: table, updates: [{ row_id: rowId, row }] }
+      : { table_name: table, row };
   let response;
   try {
-    const requestBody = method === 'POST'
-      ? { table_name: table, rows: [row] }
-      : { table_name: table, row };
     response = await fetch(endpoint, {
       method,
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
