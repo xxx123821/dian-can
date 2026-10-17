@@ -21,7 +21,15 @@ function parseMap(raw, label) {
     return value;
   } catch (_) { throw new Error(`${label} 必须是有效 JSON 对象`); }
 }
-function columnName(map, key) { return clean(map[key] || key, 100) || key; }
+const MENU_DEFAULT_COLUMNS = { type: '类型', key: '键', name: '名称', price: '价格', mainCount: '主荤数量', sideCount: '副荤数量', group: '分组', sort: '排序', value: '值', enabled: '启用', published: '上架' };
+function columnName(map, key) { return clean(map[key] || MENU_DEFAULT_COLUMNS[key] || key, 100) || key; }
+function resolveMenuMap(rows, configured) {
+  const map = { ...configured };
+  const sample = rows.find((row) => row && typeof row === 'object') || {};
+  const aliases = { type: ['类型', 'type'], key: ['键', 'key'], name: ['名称', 'name'], price: ['价格', 'price'], mainCount: ['主荤数量', 'mainCount'], sideCount: ['副荤数量', 'sideCount'], group: ['分组', 'group'], sort: ['排序', 'sort'], value: ['值', 'value'], enabled: ['启用', 'enabled'], published: ['上架', 'published'] };
+  for (const key of Object.keys(MENU_DEFAULT_COLUMNS)) if (!map[key]) map[key] = aliases[key].find((name) => Object.prototype.hasOwnProperty.call(sample, name)) || MENU_DEFAULT_COLUMNS[key];
+  return map;
+}
 function apiConfig(env) {
   const baseUuid = clean(env.SEATABLE_BASE_UUID, 120);
   const token = clean(env.SEATABLE_BASE_TOKEN, 300);
@@ -83,6 +91,7 @@ async function readLive(env) {
 }
 
 function normalizeMenu(rows, map) {
+  map = resolveMenuMap(rows, map);
   const packages = []; const dishes = []; const settings = {};
   rows.forEach((row, index) => {
     const type = clean(field(row, columnName(map, 'type'), 'type', '类型', 'itemType'), 30).toLowerCase();
@@ -94,19 +103,20 @@ function normalizeMenu(rows, map) {
   packages.sort((a, b) => a.key.localeCompare(b.key)); dishes.sort((a, b) => a.sort - b.sort); return { packages, dishes, settings };
 }
 function rowForItem(item, map) {
-  const row = { [columnName(map, 'type')]: item.type, [columnName(map, 'key')]: clean(item.key, 80), [columnName(map, 'name')]: clean(item.name, 100), [columnName(map, 'enabled')]: Boolean(item.enabled), [columnName(map, 'published')]: Boolean(item.published) };
+  const typeLabel = item.type === 'package' ? '套餐' : '菜品';
+  const row = { [columnName(map, 'type')]: typeLabel, [columnName(map, 'key')]: clean(item.key, 80), [columnName(map, 'name')]: clean(item.name, 100), [columnName(map, 'enabled')]: Boolean(item.enabled), [columnName(map, 'published')]: Boolean(item.published) };
   if (item.type === 'package') Object.assign(row, { [columnName(map, 'price')]: numberOr(item.price), [columnName(map, 'mainCount')]: Math.max(0, Math.floor(numberOr(item.mainCount))), [columnName(map, 'sideCount')]: Math.max(0, Math.floor(numberOr(item.sideCount))) });
   if (item.type === 'dish') Object.assign(row, { [columnName(map, 'group')]: clean(item.group, 30), [columnName(map, 'sort')]: numberOr(item.sort) });
   return row;
 }
 async function saveMenu(env, payload) {
   const table = clean(env.SEATABLE_MENU_TABLE_NAME, 100); if (!table) throw new Error('未配置菜单表');
-  const map = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'); const existing = await readMenuRows(env); const byId = new Map(existing.map((row) => [clean(row._id, 100), row]));
+  const configuredMap = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'); const existing = await readMenuRows(env); const map = resolveMenuMap(existing, configuredMap); const byId = new Map(existing.map((row) => [clean(row._id, 100), row]));
   const items = [...(Array.isArray(payload.packages) ? payload.packages : []), ...(Array.isArray(payload.dishes) ? payload.dishes : [])];
   for (const item of items) { if (!clean(item.name, 100) || !clean(item.key, 80)) continue; const row = rowForItem(item, map); const id = clean(item.id, 100); if (id && byId.has(id)) await seaTable(env, table, 'PUT', row, id); else await seaTable(env, table, 'POST', row); }
   const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings : {};
-  const settingRows = new Map(existing.filter((row) => clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase() === 'setting').map((row) => [clean(field(row, columnName(map, 'key'), 'key', '键'), 80), row]));
-  for (const key of ['contactName', 'contactPhone', 'soupNotice', 'giftDish', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) { const row = { [columnName(map, 'type')]: 'setting', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true }; const old = settingRows.get(key); if (old?._id) await seaTable(env, table, 'PUT', row, old._id); else await seaTable(env, table, 'POST', row); }
+  const settingRows = new Map(existing.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase())).map((row) => [clean(field(row, columnName(map, 'key'), 'key', '键'), 80), row]));
+  for (const key of ['contactName', 'contactPhone', 'soupNotice', 'giftDish', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) { const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true }; const old = settingRows.get(key); if (old?._id) await seaTable(env, table, 'PUT', row, old._id); else await seaTable(env, table, 'POST', row); }
   return normalizeMenu(await readMenuRows(env), map);
 }
 
