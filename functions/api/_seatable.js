@@ -1,18 +1,19 @@
-/** SeaTable Base API helper: exchange the long-lived Base Token for an access token. */
+/** SeaTable Base API helper: exchange an API Token for a Base Token, then use the Base API. */
 const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
 
 export async function seaTableRequest(env, tableName, method = 'GET', row = null, rowId = '') {
   const baseUuid = clean(env.SEATABLE_BASE_UUID, 120);
-  const baseToken = clean(env.SEATABLE_BASE_TOKEN, 1000);
+  const apiToken = clean(env.SEATABLE_BASE_TOKEN, 1000);
   const table = clean(tableName, 100);
-  if (!baseUuid || !baseToken) throw new Error('服务端尚未配置 SeaTable Base UUID 或 Base Token');
+  if (!baseUuid || !apiToken) throw new Error('服务端尚未配置 SeaTable 表格 UUID 或 API Token');
   if (!table) throw new Error('未配置 SeaTable 表名');
   const origin = String(env.SEATABLE_API_ORIGIN || 'https://cloud.seatable.cn').replace(/\/$/, '');
 
   let tokenResponse;
   try {
     tokenResponse = await fetch(`${origin}/api/v2.1/dtable/app-access-token/`, {
-      headers: { Authorization: `Token ${baseToken}` },
+      // SeaTable's "Get Base-Token with API-Token" endpoint requires Bearer auth.
+      headers: { Authorization: `Bearer ${apiToken}` },
       cache: 'no-store'
     });
   } catch (_) { throw new Error('无法连接 SeaTable 鉴权接口，请检查 SEATABLE_API_ORIGIN'); }
@@ -21,19 +22,17 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   try { tokenData = tokenText ? JSON.parse(tokenText) : {}; } catch (_) { }
   if (!tokenResponse.ok) {
     const detail = clean(tokenData.error || tokenData.error_msg || tokenData.message || tokenData.detail, 240);
-    const hint = `SeaTable 的 Base Token 换取访问令牌请求失败（HTTP ${tokenResponse.status}）`;
+    const hint = `SeaTable API Token 换取 Base Token 请求失败（HTTP ${tokenResponse.status}）`;
     throw new Error(detail ? `${hint}：${detail}` : hint);
   }
 
   const accessToken = clean(tokenData.access_token, 2000);
-  const dtableUuid = clean(tokenData.dtable_uuid || baseUuid, 120);
-  const dtableServer = String(tokenData.dtable_server || `${origin}/dtable-server/`).replace(/\/$/, '');
-  if (!accessToken) throw new Error('SeaTable 鉴权成功但未返回 access_token；请确认填写的是 Base API Token，而非表单分享链接或普通账号令牌');
+  if (!accessToken) throw new Error('SeaTable 鉴权成功但未返回 Base Token；请确认填写的是 API Token，而非表单分享链接或普通账号令牌');
 
   const query = new URLSearchParams({ table_name: table });
   if (method === 'GET') query.set('limit', '1000');
   const rowPath = rowId ? `${encodeURIComponent(rowId)}/` : '';
-  const endpoint = `${dtableServer}/api/v1/dtables/${encodeURIComponent(dtableUuid)}/rows/${rowPath}?${query}`;
+  const endpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/${rowPath}?${query}`;
   let response;
   try {
     response = await fetch(endpoint, {
