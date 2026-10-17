@@ -82,6 +82,7 @@ async function readRows(env) {
 function buildMenu(rows, map) {
   const mealMenus = { lunch: { packages: {}, mainMeat: [], sideMeat: [] }, dinner: { packages: {}, mainMeat: [], sideMeat: [] } };
   const settings = {};
+  const diagnostics = { rows: rows.length, settings: 0, packages: 0, dishes: 0, hidden: 0, unknown: 0 };
   const mealTargets = (value) => {
     const key = clean(value, 20).toLowerCase();
     if (key === 'lunch' || key === '午餐') return ['lunch'];
@@ -92,6 +93,7 @@ function buildMenu(rows, map) {
   rows.forEach((row, index) => {
     const type = clean(fieldValue(row, [columnName(map, 'type'), 'type', 'itemType', '类型']), 30).toLowerCase();
     if (type === 'setting' || type === '设置') {
+      diagnostics.settings += 1;
       // Settings (contact and schedule) are configuration, not menu items;
       // do not hide them just because an old row has an unchecked status.
       const key = clean(fieldValue(row, [columnName(map, 'key'), 'key', 'settingKey', '键']), 80);
@@ -100,8 +102,9 @@ function buildMenu(rows, map) {
       if (key && (value || !settings[key])) settings[key] = value;
       return;
     }
-    if (!isPublished(row, map)) return;
+    if (!isPublished(row, map)) { diagnostics.hidden += 1; return; }
     if (type === 'package' || type === '套餐') {
+      diagnostics.packages += 1;
       const key = clean(fieldValue(row, [columnName(map, 'key'), 'key', 'packageKey', '套餐键']), 20);
       const name = clean(fieldValue(row, [columnName(map, 'name'), 'name', 'packageName', '套餐名称']), 60);
       if (!key || !name) return;
@@ -115,6 +118,7 @@ function buildMenu(rows, map) {
       return;
     }
     if (type === 'dish' || type === '菜品') {
+      diagnostics.dishes += 1;
       const name = clean(fieldValue(row, [columnName(map, 'name'), 'name', 'dishName', '菜品名称']), 80);
       const group = clean(fieldValue(row, [columnName(map, 'group'), 'group', 'dishGroup', '分组']), 30);
       if (!name || (group !== 'mainMeat' && group !== 'sideMeat' && group !== '主肉' && group !== '半荤' && group !== '主荤' && group !== '副荤')) return;
@@ -123,7 +127,9 @@ function buildMenu(rows, map) {
         if (group === 'mainMeat' || group === '主肉' || group === '主荤') mealMenus[meal].mainMeat.push(item);
         else mealMenus[meal].sideMeat.push(item);
       });
+      return;
     }
+    diagnostics.unknown += 1;
   });
 
   Object.values(mealMenus).forEach((meal) => { meal.mainMeat.sort((a, b) => a.sort - b.sort); meal.sideMeat.sort((a, b) => a.sort - b.sort); meal.dishes = { mainMeat: meal.mainMeat.map((item) => item.name), sideMeat: meal.sideMeat.map((item) => item.name) }; delete meal.mainMeat; delete meal.sideMeat; });
@@ -146,6 +152,7 @@ function buildMenu(rows, map) {
   const warnings = [];
   if (!Object.keys(mealMenus.lunch.packages).length && !Object.keys(mealMenus.dinner.packages).length) warnings.push('菜单表中没有启用的套餐');
   if ((!mealMenus.lunch.dishes.mainMeat.length || !mealMenus.lunch.dishes.sideMeat.length) && (!mealMenus.dinner.dishes.mainMeat.length || !mealMenus.dinner.dishes.sideMeat.length)) warnings.push('菜单表中没有启用的菜品');
+  if (warnings.length) warnings.push(`诊断：读取 ${diagnostics.rows} 行，设置 ${diagnostics.settings} 条，套餐 ${diagnostics.packages} 条，菜品 ${diagnostics.dishes} 条，被隐藏 ${diagnostics.hidden} 条，未知类型 ${diagnostics.unknown} 条`);
   if (warnings.length) result.menuWarning = warnings.join('；');
   return result;
 }
