@@ -323,8 +323,9 @@
         state.side.clear();
         renderPackages(); renderDishes(); updateStatus();
       }));
-      $('summaryName').textContent = currentPackage().name;
-      $('price').textContent = `¥${Number(currentPackage().price).toFixed(0)}`;
+      const pkg = currentPackage();
+      $('summaryName').textContent = pkg ? pkg.name : '暂无可用套餐';
+      $('price').textContent = pkg ? `¥${Number(pkg.price).toFixed(0)}` : '¥0';
     }
 
     function renderDishList(targetId, list, selectedSet, type, limit) {
@@ -400,6 +401,19 @@
 
     function updateStatus() {
       const pkg = currentPackage();
+      if (!pkg) {
+        $('mainCount').textContent = '0/0';
+        $('sideCount').textContent = '0/0';
+        updateContactStatus();
+        $('validation').className = 'validation warn';
+        $('validation').textContent = '当前时段暂无可用套餐';
+        $('submitBtn').disabled = true;
+        $('submitBtn').style.display = 'block';
+        $('confirmBtn').style.display = 'none';
+        $('summaryName').textContent = '暂无可用套餐';
+        $('price').textContent = '¥0';
+        return;
+      }
       const mainText = requirementText('主荤', state.main.size, pkg.mainCount);
       const sideText = requirementText('副荤', state.side.size, pkg.sideCount);
       $('mainCount').textContent = `${state.main.size}/${pkg.mainCount}`;
@@ -543,10 +557,10 @@
 
     function applyRemoteMenu(menu) {
       if (!menu || typeof menu !== 'object') throw new Error('菜单数据格式错误');
-      if ((!menu.mealMenus && (!menu.packages || typeof menu.packages !== 'object' || !Object.keys(menu.packages).length))) throw new Error('菜单中没有套餐');
-      if ((!menu.mealMenus && (!menu.dishes || !Array.isArray(menu.dishes.mainMeat) || !Array.isArray(menu.dishes.sideMeat)))) throw new Error('菜单中没有菜品');
-      CONFIG.packages = menu.packages;
-      CONFIG.dishes = menu.dishes;
+      if ((!menu.mealMenus && (!menu.packages || typeof menu.packages !== 'object'))) throw new Error('菜单数据中套餐格式错误');
+      if ((!menu.mealMenus && (!menu.dishes || !Array.isArray(menu.dishes.mainMeat) || !Array.isArray(menu.dishes.sideMeat)))) throw new Error('菜单数据中菜品格式错误');
+      CONFIG.packages = menu.packages || {};
+      CONFIG.dishes = menu.dishes || { mainMeat: [], sideMeat: [] };
       CONFIG.mealMenus = menu.mealMenus || null;
       if (Object.prototype.hasOwnProperty.call(menu, 'orderDeadline')) CONFIG.orderDeadline = menu.orderDeadline || null;
       if (menu.mealSchedule && typeof menu.mealSchedule === 'object') CONFIG.mealSchedule = menu.mealSchedule;
@@ -556,6 +570,12 @@
       if (!packages[state.packageKey]) state.packageKey = Object.keys(packages)[0] || '';
       state.main.clear();
       state.side.clear();
+      if (menu.menuWarning) {
+        $('configNotice').textContent = `在线菜单提示：${menu.menuWarning}`;
+        $('configNotice').style.display = 'block';
+      } else {
+        $('configNotice').style.display = 'none';
+      }
     }
 
     async function loadRemoteMenu() {
@@ -587,7 +607,7 @@
       updateStatus();
       const pkg = currentPackage();
       const contact = updateContactStatus();
-      if (!currentMeal() || state.main.size !== pkg.mainCount || state.side.size !== pkg.sideCount || !contact.valid) {
+      if (!pkg || !currentMeal() || state.main.size !== pkg.mainCount || state.side.size !== pkg.sideCount || !contact.valid) {
         alert('当前不在开放时段，或套餐菜品数量、联系人信息不符合要求');
         return;
       }

@@ -93,7 +93,13 @@ function normalizeMenu(rows, map) {
   rows.forEach((row, index) => {
     const type = clean(field(row, columnName(map, 'type'), 'type', '类型', 'itemType'), 30).toLowerCase();
     const common = { id: clean(row?._id, 100), enabled: enabled(field(row, columnName(map, 'enabled'), 'enabled', '启用')), published: enabled(field(row, columnName(map, 'published'), 'published', '上架')) };
-    if (type === 'setting' || type === '设置') { const item = normalizeSetting(row, map); if (item.key) settings[item.key] = item; return; }
+    if (type === 'setting' || type === '设置') {
+      const item = normalizeSetting(row, map);
+      // Failed earlier saves may leave duplicate setting rows. Prefer a
+      // non-empty value so an empty duplicate cannot hide a valid setting.
+      if (item.key && (!settings[item.key] || item.value || !settings[item.key].value)) settings[item.key] = item;
+      return;
+    }
     const mealPeriod = clean(field(row, columnName(map, 'mealPeriod'), 'mealPeriod', '餐段'), 20) || '全部';
     if (type === 'package' || type === '套餐') { packages.push({ ...common, type: 'package', mealPeriod, key: clean(field(row, columnName(map, 'key'), 'key', '套餐键'), 20), name: clean(field(row, columnName(map, 'name'), 'name', '套餐名称'), 60), price: numberOr(field(row, columnName(map, 'price'), 'price', '价格')), mainCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'mainCount'), 'mainCount', '主荤数量', '主肉数量')))), sideCount: Math.max(0, Math.floor(numberOr(field(row, columnName(map, 'sideCount'), 'sideCount', '副荤数量', '半荤数量')))) }); return; }
     if (type === 'dish' || type === '菜品') { dishes.push({ ...common, type: 'dish', mealPeriod, key: clean(field(row, columnName(map, 'key'), 'key', '菜品键'), 60) || `dish-${index + 1}`, name: clean(field(row, columnName(map, 'name'), 'name', '菜名', '菜品名称'), 80), group: clean(field(row, columnName(map, 'group'), 'group', '分组'), 30), sort: numberOr(field(row, columnName(map, 'sort'), 'sort', '排序'), index) }); }
@@ -113,21 +119,24 @@ async function saveMenu(env, payload) {
   const items = [...(Array.isArray(payload.packages) ? payload.packages : []), ...(Array.isArray(payload.dishes) ? payload.dishes : [])];
   for (const item of items) { if (!clean(item.name, 100) || !clean(item.key, 80)) continue; const row = rowForItem(item, map); const id = clean(item.id, 100); if (id && byId.has(id)) await seaTable(env, table, 'PUT', row, id); else await seaTable(env, table, 'POST', row); }
   const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings : {};
-  const settingRows = new Map();
-  existing.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase())).forEach((row) => {
-    const key = clean(field(row, columnName(map, 'key'), 'key', '键'), 80);
-    if (!key) return;
-    if (!settingRows.has(key)) settingRows.set(key, []);
-    settingRows.get(key).push(row);
-  });
+  const settingRows = new Map(existing.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase())).map((row) => [clean(field(row, columnName(map, 'key'), 'key', '键'), 80), row]));
   for (const key of ['contactName', 'contactPhone', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) {
     const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true };
-    const oldRows = settingRows.get(key) || [];
-    if (oldRows.length) {
-      // Older failed saves may have created duplicate setting rows. Keep all
-      // duplicates consistent so a later row cannot overwrite a new value.
-      for (const old of oldRows) if (old?._id) await seaTable(env, table, 'PUT', row, old._id);
-    } else await seaTable(env, table, 'POST', row);
+    const old = settingRows.get(key);
+    if (old?._id) await seaTable(env, table, 'PUT', row, old._id); else await seaTable(env, table, 'POST', row);
+  }
+  return normalizeMenu(await readMenuRows(env), map);
+}
+
+async function saveSettings(env, settings) {
+  const table = clean(env.SEATABLE_MENU_TABLE_NAME, 100); if (!table) throw new Error('未配置菜单表');
+  const configuredMap = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
+  const existing = await readMenuRows(env); const map = resolveMenuMap(existing, configuredMap);
+  const settingRows = new Map(existing.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase())).map((row) => [clean(field(row, columnName(map, 'key'), 'key', '键'), 80), row]));
+  for (const key of ['contactName', 'contactPhone', 'lunchStart', 'lunchEnd', 'dinnerStart', 'dinnerEnd']) {
+    const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: clean(settings?.[key], 500), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true };
+    const old = settingRows.get(key);
+    if (old?._id) await seaTable(env, table, 'PUT', row, old._id); else await seaTable(env, table, 'POST', row);
   }
   return normalizeMenu(await readMenuRows(env), map);
 }
@@ -141,7 +150,11 @@ export async function onRequest(context) {
       const map = parseMap(context.env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
       return json({ ok: true, menu: normalizeMenu(await readMenuRows(context.env), map), ...(await readLive(context.env)) });
     }
-    if (context.request.method === 'POST') { const payload = await context.request.json(); const map = parseMap(context.env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'); return json({ ok: true, menu: await saveMenu(context.env, payload) }); }
+    if (context.request.method === 'POST') {
+      const payload = await context.request.json();
+      if (payload?.quickOnly) return json({ ok: true, menu: await saveSettings(context.env, payload.settings || {}) });
+      return json({ ok: true, menu: await saveMenu(context.env, payload) });
+    }
     return json({ ok: false, error: 'Method Not Allowed' }, 405);
   } catch (error) { console.error('Admin request failed', error); return json({ ok: false, error: error.message || '后台请求失败' }, error.status || 502); }
 }

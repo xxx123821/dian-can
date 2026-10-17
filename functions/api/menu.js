@@ -73,7 +73,9 @@ function buildMenu(rows, map) {
     if (!isPublished(row, map)) return;
     if (type === 'setting' || type === '设置') {
       const key = clean(field(row, columnName(map, 'key'), 'key', 'settingKey', '键'), 80);
-      if (key) settings[key] = clean(field(row, columnName(map, 'value'), 'value', 'settingValue', '值'), 500);
+      const value = clean(field(row, columnName(map, 'value'), 'value', 'settingValue', '值'), 500);
+      // Keep a valid value when old failed saves left duplicate setting rows.
+      if (key && (value || !settings[key])) settings[key] = value;
       return;
     }
     if (type === 'package' || type === '套餐') {
@@ -116,8 +118,10 @@ function buildMenu(rows, map) {
     orderingNotice: settings.orderingNotice || '',
     orderDeadline: settings.orderDeadline || null
   };
-  if (!Object.keys(mealMenus.lunch.packages).length && !Object.keys(mealMenus.dinner.packages).length) throw new Error('菜单表中没有启用的套餐');
-  if ((!mealMenus.lunch.dishes.mainMeat.length || !mealMenus.lunch.dishes.sideMeat.length) && (!mealMenus.dinner.dishes.mainMeat.length || !mealMenus.dinner.dishes.sideMeat.length)) throw new Error('菜单表中没有启用的菜品');
+  const warnings = [];
+  if (!Object.keys(mealMenus.lunch.packages).length && !Object.keys(mealMenus.dinner.packages).length) warnings.push('菜单表中没有启用的套餐');
+  if ((!mealMenus.lunch.dishes.mainMeat.length || !mealMenus.lunch.dishes.sideMeat.length) && (!mealMenus.dinner.dishes.mainMeat.length || !mealMenus.dinner.dishes.sideMeat.length)) warnings.push('菜单表中没有启用的菜品');
+  if (warnings.length) result.menuWarning = warnings.join('；');
   return result;
 }
 
