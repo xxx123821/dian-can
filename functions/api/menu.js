@@ -11,6 +11,7 @@
  *   SEATABLE_API_ORIGIN       Defaults to https://cloud.seatable.cn
  *   SEATABLE_AUTH_SCHEME      Bearer (default) or Token
  */
+import { seaTableRequest } from './_seatable.js';
 
 const json = (body, status = 200, extraHeaders = {}) => new Response(JSON.stringify(body), {
   status,
@@ -51,27 +52,9 @@ const numberOr = (value, fallback) => {
 };
 
 async function readRows(env) {
-  const baseUuid = clean(env.SEATABLE_BASE_UUID, 120);
-  const token = clean(env.SEATABLE_BASE_TOKEN, 300);
   const tableName = clean(env.SEATABLE_MENU_TABLE_NAME, 100);
-  if (!baseUuid || !token || !tableName) throw new Error('服务端尚未配置菜单表参数');
-
-  const origin = String(env.SEATABLE_API_ORIGIN || 'https://cloud.seatable.cn').replace(/\/$/, '');
-  const query = new URLSearchParams({ table_name: tableName, limit: '1000' });
-  const endpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/?${query}`;
-  const scheme = String(env.SEATABLE_AUTH_SCHEME || 'Bearer').trim() || 'Bearer';
-  const response = await fetch(endpoint, { headers: { Authorization: `${scheme} ${token}` } });
-  const text = await response.text();
-  if (!response.ok) {
-    let reason = '';
-    try {
-      const parsed = JSON.parse(text);
-      reason = clean(parsed.error || parsed.message || parsed.detail, 180);
-    } catch (_) { /* plain text response */ }
-    throw new Error(reason ? `菜单读取失败：${reason}` : `菜单读取失败（HTTP ${response.status}）`);
-  }
-  let data;
-  try { data = JSON.parse(text); } catch (_) { throw new Error('菜单接口返回格式错误'); }
+  if (!tableName) throw new Error('服务端尚未配置菜单表参数');
+  const data = await seaTableRequest(env, tableName, 'GET');
   return Array.isArray(data) ? data : (Array.isArray(data.rows) ? data.rows : []);
 }
 

@@ -1,4 +1,5 @@
 /** Cloudflare Pages order endpoint. */
+import { seaTableRequest } from './_seatable.js';
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -19,40 +20,8 @@ const ORDER_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期',
 const STATS_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期', sequenceNo: '序号', mealPeriod: '用餐时段', dishGroup: '分组', dishName: '菜名', quantity: '份数', packageName: '套餐名称', name: '姓名', phone: '电话' };
 function columnName(map, key) { return clean(map[key] || ORDER_DEFAULT_COLUMNS[key] || STATS_DEFAULT_COLUMNS[key] || key, 100) || key; }
 
-function apiConfig(env) {
-  const baseUuid = clean(env.SEATABLE_BASE_UUID, 120);
-  const token = clean(env.SEATABLE_BASE_TOKEN, 300);
-  if (!baseUuid || !token) throw new Error('服务端尚未配置 SeaTable 参数');
-  return {
-    baseUuid,
-    token,
-    origin: String(env.SEATABLE_API_ORIGIN || 'https://cloud.seatable.cn').replace(/\/$/, ''),
-    scheme: String(env.SEATABLE_AUTH_SCHEME || 'Bearer').trim() || 'Bearer'
-  };
-}
-
 async function seaTableFetch(env, tableName, method, row) {
-  const config = apiConfig(env);
-  const table = clean(tableName, 100);
-  if (!table) throw new Error('未配置 SeaTable 表名');
-  const query = new URLSearchParams({ table_name: table });
-  if (method === 'GET') query.set('limit', '1000');
-  const endpoint = `${config.origin}/api-gateway/api/v2/dtables/${encodeURIComponent(config.baseUuid)}/rows/?${query}`;
-  let response;
-  try {
-    response = await fetch(endpoint, {
-      method,
-      headers: { Authorization: `${config.scheme} ${config.token}`, 'Content-Type': 'application/json' },
-      body: method === 'POST' ? JSON.stringify({ table_name: table, row }) : undefined
-    });
-  } catch (_) { throw new Error('无法连接 SeaTable'); }
-  const text = await response.text();
-  if (!response.ok) {
-    let reason = '';
-    try { const parsed = JSON.parse(text); reason = clean(parsed.error || parsed.message || parsed.detail, 180); } catch (_) { }
-    throw new Error(reason ? `SeaTable 请求失败：${reason}` : `SeaTable 请求失败（HTTP ${response.status}）`);
-  }
-  try { return text ? JSON.parse(text) : {}; } catch (_) { return {}; }
+  return seaTableRequest(env, tableName, method, row);
 }
 
 function beijingNow() {
