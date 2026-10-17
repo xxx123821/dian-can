@@ -51,7 +51,7 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   // and updating rows. Updates carry row_id inside an `updates` array; a
   // row-id URL (the older Base API form) returns HTTP 405 on cloud.seatable.cn.
   const collectionEndpoint = `${origin}/api-gateway/api/v2/dtables/${encodeURIComponent(baseUuid)}/rows/`;
-  const endpoint = method === 'GET' ? `${collectionEndpoint}?${query}` : collectionEndpoint;
+  const endpoint = `${collectionEndpoint}?${query}`;
   const requestBody = method === 'POST'
     ? { table_name: table, rows: [row] }
     : method === 'PUT'
@@ -64,16 +64,32 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
       body: requestMethod === 'GET' ? undefined : JSON.stringify(body),
       cache: 'no-store'
     });
+  const attempts = [];
   try {
-    response = await send(endpoint, requestBody);
-    // Older SeaTable deployments expose the row-id URL form. Keep a narrow
-    // compatibility retry for those installations while preferring the
-    // current API-gateway format above.
-    if (!response.ok && response.status === 405 && method === 'PUT' && rowId) {
-      const legacyEndpoint = `${collectionEndpoint}${encodeURIComponent(rowId)}/?table_name=${encodeURIComponent(table)}`;
-      response = await send(legacyEndpoint, { table_name: table, row });
+    const candidates = [{ url: endpoint, body: requestBody, method }];
+    // SeaTable cloud has had two gateway write formats in production. Try the
+    // current body first, then the older single-row/row-id forms when the
+    // gateway rejects it. Never retry after a successful response.
+    if (method === 'POST') {
+      candidates.push({ url: endpoint, body: { table_name: table, row }, method });
+      candidates.push({ url: collectionEndpoint, body: requestBody, method });
+    } else if (method === 'PUT' && rowId) {
+      candidates.push({ url: `${collectionEndpoint}${encodeURIComponent(rowId)}/?table_name=${encodeURIComponent(table)}`, body: { table_name: table, row }, method });
+      candidates.push({ url: `${collectionEndpoint}${encodeURIComponent(rowId)}/`, body: row, method });
     }
-  } catch (_) { throw new Error('已连接 SeaTable 鉴权服务，但无法连接 Base 数据接口'); }
+    for (const candidate of candidates) {
+      try {
+        response = await send(candidate.url, candidate.body, candidate.method);
+        if (response.ok || ![400, 404, 405, 422].includes(response.status)) break;
+        attempts.push(`${candidate.method} ${candidate.url} -> HTTP ${response.status}`);
+      } catch (error) {
+        attempts.push(`${candidate.method} ${candidate.url} -> ${clean(error?.message || error, 160)}`);
+      }
+    }
+  } catch (error) {
+    throw new Error(`已连接 SeaTable 鉴权服务，但无法连接 Base 数据接口${error?.message ? `：${clean(error.message, 180)}` : ''}`);
+  }
+  if (!response) throw new Error(`无法连接 SeaTable Base 数据接口${attempts.length ? `（${attempts.join('；')}）` : ''}`);
   const text = await response.text();
   if (!response.ok) {
     let detail = '';
