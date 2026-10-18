@@ -14,6 +14,34 @@ CREATE INDEX IF NOT EXISTS idx_items_date ON order_items(order_date, meal_period
 let schemaPromise;
 export function d1Enabled(env) { return Boolean(env?.DB && typeof env.DB.prepare === 'function'); }
 export async function ensureD1(db) { if (!schemaPromise) schemaPromise = db.exec(SCHEMA); await schemaPromise; }
+let cleanupPromise;
+let lastCleanupAt = 0;
+const HISTORY_DAYS = 7;
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+function dateBeforeToday(days) {
+  const today = beijingDate();
+  return new Date(Date.parse(`${today}T00:00:00Z`) - days * 86400000).toISOString().slice(0, 10);
+}
+// Keep only the latest seven Beijing calendar dates. Cleanup is triggered by
+// normal D1 traffic and throttled per Worker isolate so it does not add a
+// delete query to every customer request.
+export async function cleanupD1OldData(db) {
+  const now = Date.now();
+  if (cleanupPromise) return cleanupPromise;
+  if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) return null;
+  cleanupPromise = (async () => {
+    await ensureD1(db);
+    const cutoff = dateBeforeToday(HISTORY_DAYS - 1);
+    await db.batch([
+      db.prepare('DELETE FROM order_items WHERE order_date < ?').bind(cutoff),
+      db.prepare('DELETE FROM orders WHERE order_date < ?').bind(cutoff),
+      db.prepare('DELETE FROM daily_sequences WHERE order_date < ?').bind(cutoff)
+    ]);
+    lastCleanupAt = Date.now();
+    return { cutoff, historyDays: HISTORY_DAYS };
+  })().finally(() => { cleanupPromise = null; });
+  return cleanupPromise;
+}
 export function beijingDate() { const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); const get = (type) => parts.find((part) => part.type === type)?.value || ''; return `${get('year')}-${get('month')}-${get('day')}`; }
 export function beijingIso() { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'medium' }).format(new Date()).replace(' ', 'T'); }
 function targets(value) { const key = clean(value, 20).toLowerCase(); return key === '午餐' || key === 'lunch' ? ['lunch'] : (key === '晚餐' || key === 'dinner' ? ['dinner'] : ['lunch', 'dinner']); }

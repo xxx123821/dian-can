@@ -1,6 +1,6 @@
 /** Protected merchant API. */
 import { seaTableRequest } from './_seatable.js';
-import { d1Enabled as d1EnabledBinding, ensureD1, readD1Config, adminMenu, saveD1Menu, saveD1Settings, readD1Live, archiveD1Today } from './_d1.js';
+import { d1Enabled as d1EnabledBinding, ensureD1, cleanupD1OldData, readD1Config, adminMenu, saveD1Menu, saveD1Settings, readD1Live, archiveD1Today } from './_d1.js';
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -233,6 +233,7 @@ async function saveSettings(env, settings) {
 
 async function onRequestD1(context) {
   await ensureD1(context.env.DB);
+  await cleanupD1OldData(context.env.DB);
   if (context.request.method === 'GET') {
     const url = new URL(context.request.url); const section = url.searchParams.get('section');
     if (section === 'live' || section === 'history') return json({ ok: true, ...(await readD1Live(context.env.DB, allowedHistoryDate(url.searchParams.get('date') || ''), section === 'history')) });

@@ -1,6 +1,6 @@
 /** Cloudflare Pages order endpoint. */
 import { seaTableRequest } from './_seatable.js';
-import { d1Enabled, ensureD1, readD1Config, d1Schedule, assertD1MealOpen, validateD1Order, nextD1Sequence, peekD1Sequence, insertD1Order } from './_d1.js';
+import { d1Enabled, ensureD1, cleanupD1OldData, readD1Config, d1Schedule, assertD1MealOpen, validateD1Order, nextD1Sequence, peekD1Sequence, insertD1Order } from './_d1.js';
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -238,7 +238,7 @@ async function onRequestPostD1({ request, env }) {
   let raw; try { raw = await request.json(); } catch (_) { return json({ ok: false, error: '请求格式错误' }, 400); }
   const input = { packageName: clean(raw.packageName, 40), mealPeriod: clean(raw.mealPeriod, 20), mainMeat: clean(raw.mainMeat, 500), sideMeat: clean(raw.sideMeat, 500), name: clean(raw.name, 60), phone: clean(raw.phone, 30), price: Number(raw.price) };
   if (!input.packageName || !input.mealPeriod || !Number.isFinite(input.price) || !input.name || !/^1[3-9]\d{9}$/.test(input.phone)) return json({ ok: false, error: '订单信息不完整或格式不正确' }, 400);
-  try { await ensureD1(env.DB); const config = await readD1Config(env.DB); const now = beijingNow(); assertD1MealOpen(d1Schedule(config), input.mealPeriod, now.minutes); validateD1Order(input, config); const sequenceNo = await nextD1Sequence(env.DB, now.date); const result = await insertD1Order(env.DB, input, now.date, sequenceNo); return json({ ok: true, ...result }); } catch (error) { console.error('D1 order submit failed', error); return json({ ok: false, error: error.message || '订单提交失败' }, error.status || 502); }
+  try { await ensureD1(env.DB); await cleanupD1OldData(env.DB); const config = await readD1Config(env.DB); const now = beijingNow(); assertD1MealOpen(d1Schedule(config), input.mealPeriod, now.minutes); validateD1Order(input, config); const sequenceNo = await nextD1Sequence(env.DB, now.date); const result = await insertD1Order(env.DB, input, now.date, sequenceNo); return json({ ok: true, ...result }); } catch (error) { console.error('D1 order submit failed', error); return json({ ok: false, error: error.message || '订单提交失败' }, error.status || 502); }
 }
 
 export async function onRequestPost({ request, env }) {
