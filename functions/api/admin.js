@@ -240,7 +240,9 @@ export async function onRequest(context) {
         return json({ ok: true, ...(await readLive(context.env, url.searchParams.get('date') || '', section === 'history')) });
       }
       const map = parseMap(context.env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
-      return json({ ok: true, menu: normalizeMenu(await readMenuRows(context.env), map), ...(await readLive(context.env)) });
+      // 登录和菜单编辑不应被订单/统计表的慢查询阻塞。订单区由前端
+      // 登录完成后单独调用 section=live 刷新，统计接口异常时仍可进入后台。
+      return json({ ok: true, menu: normalizeMenu(await readMenuRows(context.env), map) });
     }
     if (context.request.method === 'POST') {
       const payload = await context.request.json();
