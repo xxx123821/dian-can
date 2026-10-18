@@ -1,5 +1,6 @@
 /** Protected merchant API. */
 import { seaTableRequest } from './_seatable.js';
+import { d1Enabled as d1EnabledBinding, ensureD1, readD1Config, adminMenu, saveD1Menu, saveD1Settings, readD1Live, archiveD1Today } from './_d1.js';
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -230,9 +231,24 @@ async function saveSettings(env, settings) {
   return normalizeMenu(await readMenuRows(env), map);
 }
 
+async function onRequestD1(context) {
+  await ensureD1(context.env.DB);
+  if (context.request.method === 'GET') {
+    const url = new URL(context.request.url); const section = url.searchParams.get('section');
+    if (section === 'live' || section === 'history') return json({ ok: true, ...(await readD1Live(context.env.DB, allowedHistoryDate(url.searchParams.get('date') || ''), section === 'history')) });
+    return json({ ok: true, menu: adminMenu(await readD1Config(context.env.DB)) });
+  }
+  if (context.request.method !== 'POST') return json({ ok: false, error: 'Method Not Allowed' }, 405);
+  const payload = await context.request.json();
+  if (payload?.archiveToday) { const archived = await archiveD1Today(context.env.DB); return json({ ok: true, archived, ...(await readD1Live(context.env.DB, beijingDate(), false)) }); }
+  if (payload?.quickOnly) return json({ ok: true, menu: await saveD1Settings(context.env.DB, payload.settings || {}) });
+  return json({ ok: true, menu: await saveD1Menu(context.env.DB, payload) });
+}
+
 export async function onRequest(context) {
   try {
     assertAdmin(context.request, context.env);
+    if (d1EnabledBinding(context.env)) return onRequestD1(context);
     if (context.request.method === 'GET') {
       const url = new URL(context.request.url);
       if (url.searchParams.get('section') === 'live' || url.searchParams.get('section') === 'history') {

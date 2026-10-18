@@ -12,6 +12,7 @@
  *   SEATABLE_AUTH_SCHEME      Bearer (default) or Token
  */
 import { seaTableRequest } from './_seatable.js';
+import { d1Enabled, ensureD1, readD1Config, publicMenu } from './_d1.js';
 
 const json = (body, status = 200, extraHeaders = {}) => new Response(JSON.stringify(body), {
   status,
@@ -195,6 +196,10 @@ function buildMenu(rows, map) {
 
 export async function onRequestGet({ env }) {
   try {
+    if (d1Enabled(env)) {
+      await ensureD1(env.DB);
+      return json({ ok: true, ...publicMenu(await readD1Config(env.DB)) }, 200, { 'cache-control': 'no-store' });
+    }
     const map = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
     const menu = buildMenu(await readRows(env), map);
     return json({ ok: true, ...menu }, 200, { 'cache-control': 'no-store' });
