@@ -619,14 +619,20 @@
       if (!CONFIG.loadRemoteMenu || location.protocol === 'file:') return true;
       try {
         const url = `${CONFIG.menuEndpoint}${CONFIG.menuEndpoint.includes('?') ? '&' : '?'}_=${Date.now()}`;
-        const response = await fetch(url, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Pragma: 'no-cache' }, cache: 'no-store' });
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 15000);
+        let response;
+        try {
+          response = await fetch(url, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Pragma: 'no-cache' }, cache: 'no-store', signal: controller.signal });
+        } finally { window.clearTimeout(timeout); }
         const menu = await response.json().catch(() => ({}));
         if (!response.ok || menu.ok === false) throw new Error(menu.error || `菜单读取失败（${response.status}）`);
         applyRemoteMenu(menu);
         return true;
       } catch (error) {
         // 在线读取失败时不显示本地旧菜单，避免顾客误按过期时间下单。
-        $('configNotice').textContent = `暂时无法同步商家最新菜单和点餐时间（${error.message || '网络连接失败'}）。请稍后点此页面刷新再试。`;
+        const reason = error.name === 'AbortError' ? '连接超时（SeaTable 暂时没有响应）' : (error.message || '网络连接失败');
+        $('configNotice').innerHTML = `暂时无法同步商家最新菜单和点餐时间（${escapeHtml(reason)}）。<button type="button" style="margin-left:8px;padding:5px 9px" onclick="location.reload()">重新同步</button>`;
         $('configNotice').style.display = 'block';
         return false;
       }

@@ -6,6 +6,14 @@ const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
 // Worker isolate (the token itself is never sent to the browser).
 const tokenCache = new Map();
 const TOKEN_CACHE_MS = 5 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 12000;
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try { return await fetch(url, { ...options, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
+}
 
 async function exchangeToken(origin, apiToken) {
   const key = `${origin}|${apiToken}`;
@@ -13,7 +21,7 @@ async function exchangeToken(origin, apiToken) {
   const cached = tokenCache.get(key);
   if (cached && cached.expiresAt > now) return cached.promise;
   const promise = (async () => {
-    const response = await fetch(`${origin}/api/v2.1/dtable/app-access-token/`, {
+    const response = await fetchWithTimeout(`${origin}/api/v2.1/dtable/app-access-token/`, {
       headers: { Authorization: `Bearer ${apiToken}` },
       cache: 'no-store'
     });
@@ -79,7 +87,7 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
       ? { table_name: table, updates: batch ? row : [{ row_id: rowId, row }] }
       : { table_name: table, row };
   let response;
-  const send = (url, body, requestMethod = method) => fetch(url, {
+  const send = (url, body, requestMethod = method) => fetchWithTimeout(url, {
       method: requestMethod,
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: requestMethod === 'GET' ? undefined : JSON.stringify(body),
