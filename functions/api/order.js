@@ -33,6 +33,12 @@ async function seaTableFetch(env, tableName, method, row) {
   return seaTableRequest(env, tableName, method, row);
 }
 
+async function readMenuRows(env) {
+  const tableName = clean(env.SEATABLE_MENU_TABLE_NAME, 100);
+  if (!tableName) return null;
+  return rowsFromResponse(await seaTableFetch(env, tableName, 'GET'));
+}
+
 function beijingNow() {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -53,7 +59,7 @@ function defaultMealSchedule() {
   return { lunch: { label: '午餐', start: '00:00', end: '23:59' }, dinner: { label: '晚餐', start: '00:00', end: '23:59' } };
 }
 
-async function mealSchedule(env) {
+async function mealSchedule(env, sourceRows = null) {
   const defaults = defaultMealSchedule();
   if (String(env.MEAL_SCHEDULE_JSON || '').trim()) {
     try {
@@ -63,10 +69,10 @@ async function mealSchedule(env) {
   }
   if (!clean(env.SEATABLE_MENU_TABLE_NAME, 100)) return defaults;
   try {
-    const data = await seaTableFetch(env, env.SEATABLE_MENU_TABLE_NAME, 'GET');
-    const menuMap = resolveMenuMap(rowsFromResponse(data), parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'));
+    const rows = sourceRows || await readMenuRows(env) || [];
+    const menuMap = resolveMenuMap(rows, parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP'));
     const settings = {};
-    rowsFromResponse(data).forEach((row) => {
+    rows.forEach((row) => {
       const type = clean(row[columnName(menuMap, 'type')] ?? row.type ?? row.itemType ?? row['类型'], 30).toLowerCase();
       const key = clean(row[columnName(menuMap, 'key')] ?? row.key ?? row.settingKey ?? row['键'], 60);
       if ((type === 'setting' || type === '设置') && key) settings[key] = clean(row[columnName(menuMap, 'value')] ?? row.value ?? row.settingValue ?? row['值'], 100);
@@ -115,11 +121,11 @@ function dishGroup(value) {
   return '';
 }
 
-async function readOrderMenu(env) {
+async function readOrderMenu(env, sourceRows = null) {
   const tableName = clean(env.SEATABLE_MENU_TABLE_NAME, 100);
   if (!tableName) return null;
   const mapConfig = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
-  const rows = rowsFromResponse(await seaTableFetch(env, tableName, 'GET'));
+  const rows = sourceRows || await readMenuRows(env) || [];
   const map = resolveMenuMap(rows, mapConfig);
   const menus = { lunch: { packages: [], mainMeat: new Set(), sideMeat: new Set() }, dinner: { packages: [], mainMeat: new Set(), sideMeat: new Set() } };
   const targets = (value) => { const key = clean(valueFrom(value, map, 'mealPeriod', ['餐段']), 20).toLowerCase(); return key === '午餐' || key === 'lunch' ? ['lunch'] : (key === '晚餐' || key === 'dinner' ? ['dinner'] : ['lunch', 'dinner']); };
@@ -240,14 +246,18 @@ export async function onRequestPost({ request, env }) {
     const orderMap = parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP');
     const statsMap = parseMap(env.SEATABLE_STATS_COLUMN_MAP, 'SEATABLE_STATS_COLUMN_MAP');
     const now = beijingNow();
-    assertMealOpen(await mealSchedule(env), input.mealPeriod, now.minutes);
-    validateOrderAgainstMenu(input, await readOrderMenu(env));
+    // Read the menu/configuration table once per order. The same rows provide
+    // both the meal schedule and the current menu validation.
+    const menuRows = String(env.MEAL_SCHEDULE_JSON || '').trim() ? null : await readMenuRows(env);
+    assertMealOpen(await mealSchedule(env, menuRows), input.mealPeriod, now.minutes);
+    validateOrderAgainstMenu(input, await readOrderMenu(env, menuRows));
     const orderTable = clean(env.SEATABLE_TABLE_NAME, 100); const statsTable = clean(env.SEATABLE_STATS_TABLE_NAME, 100);
     if (!orderTable || !statsTable) throw new Error('请配置订单表和菜品统计表名称');
     const sequenceNo = await nextDailySequence(env, orderTable, orderMap, now.date);
     const orderNo = `D${now.date.replace(/-/g, '').slice(2)}-${String(sequenceNo).padStart(4, '0')}`;
     await seaTableFetch(env, orderTable, 'POST', buildOrderRow(input, orderMap, orderNo, now.date, sequenceNo));
-    for (const row of buildStatsRows(input, statsMap, orderNo, now.date, sequenceNo)) await seaTableFetch(env, statsTable, 'POST', row);
+    const statsRows = buildStatsRows(input, statsMap, orderNo, now.date, sequenceNo);
+    if (statsRows.length) await seaTableFetch(env, statsTable, 'POST', statsRows);
     return json({ ok: true, orderNo, sequenceNo, orderDate: now.date, mealPeriod: input.mealPeriod });
   } catch (error) {
     console.error('Order submit failed', error);

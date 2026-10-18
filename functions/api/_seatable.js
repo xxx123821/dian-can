@@ -1,5 +1,30 @@
 /** SeaTable Base API helper: exchange an API Token for a Base Token, then use the Base API. */
 const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
+// A single order can touch the menu, order and statistics tables. Reusing the
+// short-lived exchanged Base Token avoids an extra authentication round trip
+// for every one of those requests while keeping the cache local to this
+// Worker isolate (the token itself is never sent to the browser).
+const tokenCache = new Map();
+const TOKEN_CACHE_MS = 5 * 60 * 1000;
+
+async function exchangeToken(origin, apiToken) {
+  const key = `${origin}|${apiToken}`;
+  const now = Date.now();
+  const cached = tokenCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+  const promise = (async () => {
+    const response = await fetch(`${origin}/api/v2.1/dtable/app-access-token/`, {
+      headers: { Authorization: `Bearer ${apiToken}` },
+      cache: 'no-store'
+    });
+    const text = await response.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (_) { }
+    return { ok: response.ok, status: response.status, data, text };
+  })();
+  tokenCache.set(key, { expiresAt: now + TOKEN_CACHE_MS, promise });
+  try { return await promise; } catch (error) { tokenCache.delete(key); throw error; }
+}
 
 export async function seaTableRequest(env, tableName, method = 'GET', row = null, rowId = '') {
   const baseUuid = clean(env.SEATABLE_BASE_UUID, 120);
@@ -14,15 +39,13 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   const origins = [...new Set(['https://cloud.seatable.cn', configuredOrigin].filter(Boolean))];
 
   let tokenResponse;
+  let tokenData = {};
   let origin = origins[0];
   for (const candidate of origins) {
     try {
-      const response = await fetch(`${candidate}/api/v2.1/dtable/app-access-token/`, {
-        // SeaTable's "Get Base-Token with API-Token" endpoint requires Bearer auth.
-        headers: { Authorization: `Bearer ${apiToken}` },
-        cache: 'no-store'
-      });
-      tokenResponse = response;
+      const exchanged = await exchangeToken(candidate, apiToken);
+      tokenResponse = exchanged;
+      tokenData = exchanged.data || {};
       origin = candidate;
       break;
     } catch (_) {
@@ -32,10 +55,7 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
   }
   // If both auth requests were temporarily unreachable, still try the Base
   // API with the configured token; base-scoped tokens do not need exchange.
-  if (!tokenResponse) tokenResponse = { ok: false, status: 0, text: async () => '' };
-  const tokenText = await tokenResponse.text();
-  let tokenData = {};
-  try { tokenData = tokenText ? JSON.parse(tokenText) : {}; } catch (_) { }
+  if (!tokenResponse) tokenResponse = { ok: false, status: 0, text: '' };
   // SeaTable installations expose two similar credentials in different places:
   // a base-scoped API token (already usable as Bearer on the Base API), and an
   // account API token (must first be exchanged for a Base Token). Support both.

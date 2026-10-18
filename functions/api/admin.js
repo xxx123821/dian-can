@@ -88,7 +88,7 @@ function archiveSetting(rows, date, map) {
   const values = rows.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase()) && clean(field(row, columnName(map, 'key'), 'key', '键'), 100) === targetKey).map((row) => Number(field(row, columnName(map, 'value'), 'value', '值'))).filter(Number.isFinite);
   return values.length ? Math.max(...values) : 0;
 }
-async function readLive(env, requestedDate = '') {
+async function readLive(env, requestedDate = '', includeArchived = false) {
   const orderMap = { ...ORDER_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP') };
   const statsMap = { ...STATS_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_STATS_COLUMN_MAP, 'SEATABLE_STATS_COLUMN_MAP') };
   const targetDate = allowedHistoryDate(requestedDate);
@@ -98,7 +98,7 @@ async function readLive(env, requestedDate = '') {
     const menuMap = { ...MENU_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP') };
     archiveSequence = archiveSetting(await readMenuRows(env), targetDate, menuMap);
   }
-  const orders = allOrders.filter((row) => targetDate !== beijingDate() || orderSequence(row, orderMap) > archiveSequence).map((row) => ({
+  const orders = allOrders.filter((row) => includeArchived || targetDate !== beijingDate() || orderSequence(row, orderMap) > archiveSequence).map((row) => ({
     orderNo: field(row, columnName(orderMap, 'orderNo'), 'orderNo', '订单号'), sequenceNo: field(row, columnName(orderMap, 'sequenceNo'), 'sequenceNo', '序号', '订单序号'),
     mealPeriod: field(row, columnName(orderMap, 'mealPeriod'), 'mealPeriod', '用餐时段'), packageName: field(row, columnName(orderMap, 'packageName'), 'packageName', '套餐名称'),
     price: field(row, columnName(orderMap, 'price'), 'price', '价格'), mainMeat: field(row, columnName(orderMap, 'mainMeat'), 'mainMeat', '主荤', '主肉'), sideMeat: field(row, columnName(orderMap, 'sideMeat'), 'sideMeat', '副荤', '半荤'),
@@ -107,7 +107,7 @@ async function readLive(env, requestedDate = '') {
   const statsRows = rowsFrom(await seaTable(env, env.SEATABLE_STATS_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(statsMap, 'orderDate'), 'orderDate', '日期')) === targetDate);
   const totals = { lunch: {}, dinner: {} };
   statsRows.forEach((row) => {
-    if (targetDate === beijingDate() && orderSequence(row, statsMap) <= archiveSequence) return;
+    if (!includeArchived && targetDate === beijingDate() && orderSequence(row, statsMap) <= archiveSequence) return;
     const name = clean(field(row, columnName(statsMap, 'dishName'), 'dishName', '菜名', '菜品名称'), 80); if (!name) return;
     const group = clean(field(row, columnName(statsMap, 'dishGroup'), 'dishGroup', '分组'), 30);
     const meal = /晚餐|dinner/i.test(String(field(row, columnName(statsMap, 'mealPeriod'), 'mealPeriod', '用餐时段', '餐段'))) ? 'dinner' : 'lunch';
@@ -228,7 +228,10 @@ export async function onRequest(context) {
     assertAdmin(context.request, context.env);
     if (context.request.method === 'GET') {
       const url = new URL(context.request.url);
-      if (url.searchParams.get('section') === 'live' || url.searchParams.get('section') === 'history') return json({ ok: true, ...(await readLive(context.env, url.searchParams.get('date') || '')) });
+      if (url.searchParams.get('section') === 'live' || url.searchParams.get('section') === 'history') {
+        const section = url.searchParams.get('section');
+        return json({ ok: true, ...(await readLive(context.env, url.searchParams.get('date') || '', section === 'history')) });
+      }
       const map = parseMap(context.env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
       return json({ ok: true, menu: normalizeMenu(await readMenuRows(context.env), map), ...(await readLive(context.env)) });
     }
