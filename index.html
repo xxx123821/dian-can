@@ -139,8 +139,8 @@
     <header class="header">
       <h1 id="pageTitle">今日点餐</h1>
       <p id="contactNotice"></p>
-      <p class="rules">套餐价格：<br>【一主荤 + 二个副荤】👉 13元<br>【二主荤 + 一个副荤】👉 15元<br>【二主荤 + 二个副荤】👉 18元<br>【减脂餐（每日固定）】👉 15元<span class="soup-in-rules">备注:任意套餐均赠送例汤</span></p>
-      <p class="meal-schedule" id="mealScheduleNotice">点餐时段：午餐 00:00 开始，10:30 结束；晚餐 12:00 开始，16:00 结束。</p>
+      <p class="rules" id="packageRules">正在同步商家最新套餐…</p>
+      <p class="meal-schedule" id="mealScheduleNotice">正在同步商家最新点餐时间…</p>
       <p id="deadlineNotice">请选择午餐或晚餐</p>
       <p id="configNotice" style="display:none;color:#a35a00;margin-top:8px">当前是本地预览模式：部署到 Cloudflare Pages 后才能正式提交订单。</p>
     </header>
@@ -326,6 +326,7 @@
 
     function renderPackages() {
       const packages = activeMenu().packages || {};
+      renderPackageRules();
       $('packageTabs').innerHTML = Object.entries(packages).map(([key, item]) => `
         <button type="button" class="package-tab ${key === state.packageKey ? 'active' : ''}" data-package="${escapeHtml(key)}">
           <strong>${escapeHtml(item.name)} · ¥${Number(item.price).toFixed(0)}</strong>
@@ -342,6 +343,12 @@
       $('summaryName').textContent = pkg ? pkg.name : '暂无可用套餐';
       $('price').textContent = pkg ? `¥${Number(pkg.price).toFixed(0)}` : '¥0';
     }
+
+    // 微信等内置浏览器有时会把返回前台的页面从 BFCache 恢复；强制重载，
+    // 让恢复页面也重新向商家菜单接口确认时段和菜品。
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) location.reload();
+    });
 
     function renderDishList(targetId, list, selectedSet, type, limit) {
       $(targetId).innerHTML = list.map((dish, index) => {
@@ -581,11 +588,15 @@
       // Apply valid remote fields independently. A partially configured menu
       // must not hide the local dish fallback or prevent contact/schedule
       // updates from reaching customers.
-      if (hasPackages) CONFIG.packages = menu.packages;
-      if (hasDishes) {
-        CONFIG.dishes = menu.dishes;
-        CONFIG.mealMenus = menu.mealMenus || null;
+      // 在线菜单是权威来源。即使商家暂时把套餐/菜品全部下架，也不能
+      // 回退显示 HTML 内旧的本地菜单，否则顾客会误以为旧配置仍可使用。
+      if (menu.mealMenus && typeof menu.mealMenus === 'object') {
+        CONFIG.mealMenus = menu.mealMenus;
+        CONFIG.packages = menu.packages || {};
+        CONFIG.dishes = menu.dishes || { mainMeat: [], sideMeat: [] };
       } else {
+        CONFIG.packages = menu.packages || {};
+        CONFIG.dishes = menu.dishes || { mainMeat: [], sideMeat: [] };
         CONFIG.mealMenus = null;
       }
       if (Object.prototype.hasOwnProperty.call(menu, 'orderDeadline')) CONFIG.orderDeadline = menu.orderDeadline || null;
@@ -605,17 +616,33 @@
     }
 
     async function loadRemoteMenu() {
-      if (!CONFIG.loadRemoteMenu || location.protocol === 'file:') return;
+      if (!CONFIG.loadRemoteMenu || location.protocol === 'file:') return true;
       try {
-        const response = await fetch(CONFIG.menuEndpoint, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+        const url = `${CONFIG.menuEndpoint}${CONFIG.menuEndpoint.includes('?') ? '&' : '?'}_=${Date.now()}`;
+        const response = await fetch(url, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Pragma: 'no-cache' }, cache: 'no-store' });
         const menu = await response.json().catch(() => ({}));
         if (!response.ok || menu.ok === false) throw new Error(menu.error || `菜单读取失败（${response.status}）`);
         applyRemoteMenu(menu);
+        return true;
       } catch (error) {
-        // 保留文件顶部的本地备用菜单，避免商家暂时配置错误时页面完全不可用。
-        $('configNotice').textContent = `未读取到在线菜单，当前使用备用配置：${error.message || '未知错误'}`;
+        // 在线读取失败时不显示本地旧菜单，避免顾客误按过期时间下单。
+        $('configNotice').textContent = `暂时无法同步商家最新菜单和点餐时间（${error.message || '网络连接失败'}）。请稍后点此页面刷新再试。`;
         $('configNotice').style.display = 'block';
+        return false;
       }
+    }
+
+    function renderPackageRules() {
+      const packages = Object.values(activeMenu().packages || {});
+      if (!packages.length) {
+        $('packageRules').innerHTML = '当前餐段暂无上架套餐。';
+        return;
+      }
+      const lines = packages.map((item) => {
+        const rule = item.mainCount === 0 && item.sideCount === 0 ? '每日固定' : `${item.mainCount}主荤 + ${item.sideCount}副荤`;
+        return `【${escapeHtml(item.name)}（${rule}）】👉 ${Number(item.price) || 0}元`;
+      });
+      $('packageRules').innerHTML = `套餐价格：<br>${lines.join('<br>')}<span class="soup-in-rules">备注:任意套餐均赠送例汤</span>`;
     }
 
     function showDraft(payload) {
@@ -700,12 +727,27 @@
       renderTodayTitle();
       loadCustomerInfo();
       $('configNotice').style.display = location.protocol === 'file:' ? 'block' : 'none';
-      await loadRemoteMenu();
+      $('mealScheduleNotice').textContent = '正在同步商家最新点餐时间…';
+      $('packageRules').textContent = '正在同步商家最新套餐…';
+      if (CONFIG.loadRemoteMenu && location.protocol !== 'file:') {
+        $('configNotice').textContent = '正在连接商家菜单，请稍候…';
+        $('configNotice').style.display = 'block';
+        $('orderCard').style.display = 'none';
+      }
+      const menuReady = await loadRemoteMenu();
+      if (!menuReady) {
+        $('mealScheduleNotice').textContent = '未能确认当前点餐时间，暂不开放下单';
+        $('packageRules').textContent = '未能同步最新套餐信息';
+        $('deadlineNotice').textContent = '为避免按过期菜单下单，请刷新页面重试';
+        return;
+      }
+      $('configNotice').style.display = location.protocol === 'file:' ? 'block' : ($('configNotice').textContent.startsWith('在线菜单提示：') ? 'block' : 'none');
       renderOrderHistory();
       $('contactNotice').textContent = `点餐联系人：${CONFIG.contactName} ${CONFIG.contactPhone}`;
       const lunch = CONFIG.mealSchedule.lunch;
       const dinner = CONFIG.mealSchedule.dinner;
       $('mealScheduleNotice').textContent = `点餐时段：${lunch.label} ${lunch.start} 开始，${lunch.end} 结束；${dinner.label} ${dinner.start} 开始，${dinner.end} 结束。`;
+      $('orderCard').style.display = '';
       renderPackages(); renderDishes(); updateStatus(); refreshDeadline();
       window.setInterval(refreshDeadline, 1000);
       window.setInterval(renderTodayTitle, 60000);
