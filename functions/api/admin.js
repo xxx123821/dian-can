@@ -122,17 +122,19 @@ async function archiveToday(env) {
   const today = beijingDate();
   const orderMap = { ...ORDER_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP') };
   const orders = rowsFrom(await seaTable(env, env.SEATABLE_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(orderMap, 'orderDate'), 'orderDate', '日期')) === today);
-  const sequence = orders.reduce((max, row) => Math.max(max, orderSequence(row, orderMap)), 0);
-  if (!sequence) return { archivedThrough: 0, archivedOrders: 0 };
   const table = clean(env.SEATABLE_MENU_TABLE_NAME, 100);
   const configuredMap = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
   const menuRows = await readMenuRows(env); const map = resolveMenuMap(menuRows, configuredMap);
   const key = `archiveSequence:${today}`;
+  const previousSequence = archiveSetting(menuRows, today, map);
+  const sequence = orders.reduce((max, row) => Math.max(max, orderSequence(row, orderMap)), 0);
+  const newlyArchived = orders.filter((item) => orderSequence(item, orderMap) > previousSequence && orderSequence(item, orderMap) <= sequence).length;
+  if (!sequence || !newlyArchived) return { archivedThrough: previousSequence, archivedOrders: 0 };
   const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: String(sequence), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true };
   const matches = menuRows.filter((item) => ['setting', '设置'].includes(clean(field(item, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase()) && clean(field(item, columnName(map, 'key'), 'key', '键'), 100) === key);
   if (matches.length) await seaTable(env, table, 'PUT', matches.filter((item) => item?._id).map((item) => ({ row_id: item._id, row })));
   else await seaTable(env, table, 'POST', row);
-  return { archivedThrough: sequence, archivedOrders: orders.filter((item) => orderSequence(item, orderMap) <= sequence).length };
+  return { archivedThrough: sequence, archivedOrders: newlyArchived };
 }
 
 function normalizeMenu(rows, map) {
