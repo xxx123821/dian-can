@@ -494,12 +494,10 @@
     }
 
     async function previewOrderNo() {
-      if (location.protocol === 'file:') return localPreviewOrderNo();
-      const url = `${CONFIG.submissionEndpoint}?preview=1`;
-      const response = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.ok === false || !result.orderNo) throw new Error(result.error || `获取订单号失败（${response.status}）`);
-      return result.orderNo;
+      // 这里的号码只用于“生成订单”预览，正式提交时仍由服务端分配
+      // 唯一序号。直接使用本机当天计数，避免顾客在生成订单阶段再等待
+      // 一次 SeaTable 读取；成功弹窗会显示最终服务器序号。
+      return localPreviewOrderNo();
     }
 
     function showSuccess(orderNo, sequenceNo) {
