@@ -24,7 +24,7 @@ function parseMap(raw, label) {
 }
 const MENU_DEFAULT_COLUMNS = { type: '类型', key: '键', name: '名称', price: '价格', mainCount: '主荤数量', sideCount: '副荤数量', group: '分组', sort: '排序', mealPeriod: '餐段', value: '值', enabled: '启用', published: '上架' };
 const ORDER_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期', sequenceNo: '序号', mealPeriod: '用餐时段', packageName: '套餐名称', price: '价格', mainMeat: '主荤', sideMeat: '副荤', name: '姓名', phone: '电话' };
-const STATS_DEFAULT_COLUMNS = { orderDate: '订单日期', dishGroup: '分组', dishName: '菜名', quantity: '份数' };
+const STATS_DEFAULT_COLUMNS = { orderNo: '订单号', orderDate: '订单日期', sequenceNo: '序号', mealPeriod: '用餐时段', dishGroup: '分组', dishName: '菜名', quantity: '份数' };
 function columnName(map, key) { return clean(map[key] || MENU_DEFAULT_COLUMNS[key] || key, 100) || key; }
 function resolveMenuMap(rows, configured) {
   const map = { ...configured };
@@ -78,21 +78,61 @@ function allowedHistoryDate(value) {
 function normalizeSetting(row, map) { return { id: clean(row?._id, 100), key: clean(field(row, columnName(map, 'key'), 'key', '键'), 80), value: clean(field(row, columnName(map, 'value'), 'value', '值'), 500), enabled: enabled(field(row, columnName(map, 'enabled'), 'enabled', '启用')), published: enabled(field(row, columnName(map, 'published'), 'published', '上架')) }; }
 
 async function readMenuRows(env) { return rowsFrom(await seaTable(env, env.SEATABLE_MENU_TABLE_NAME, 'GET')); }
+function orderSequence(row, map) {
+  const explicit = Number(field(row, columnName(map, 'sequenceNo'), 'sequenceNo', '序号', '订单序号'));
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  return Number(String(field(row, columnName(map, 'orderNo'), 'orderNo', '订单号')).match(/-(\d{4})$/)?.[1] || 0);
+}
+function archiveSetting(rows, date, map) {
+  const targetKey = `archiveSequence:${date}`;
+  const values = rows.filter((row) => ['setting', '设置'].includes(clean(field(row, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase()) && clean(field(row, columnName(map, 'key'), 'key', '键'), 100) === targetKey).map((row) => Number(field(row, columnName(map, 'value'), 'value', '值'))).filter(Number.isFinite);
+  return values.length ? Math.max(...values) : 0;
+}
 async function readLive(env, requestedDate = '') {
   const orderMap = { ...ORDER_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP') };
   const statsMap = { ...STATS_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_STATS_COLUMN_MAP, 'SEATABLE_STATS_COLUMN_MAP') };
   const targetDate = allowedHistoryDate(requestedDate);
-  const orders = rowsFrom(await seaTable(env, env.SEATABLE_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(orderMap, 'orderDate'), 'orderDate', '日期')) === targetDate).map((row) => ({
+  const allOrders = rowsFrom(await seaTable(env, env.SEATABLE_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(orderMap, 'orderDate'), 'orderDate', '日期')) === targetDate);
+  let archiveSequence = 0;
+  if (targetDate === beijingDate()) {
+    const menuMap = { ...MENU_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP') };
+    archiveSequence = archiveSetting(await readMenuRows(env), targetDate, menuMap);
+  }
+  const orders = allOrders.filter((row) => targetDate !== beijingDate() || orderSequence(row, orderMap) > archiveSequence).map((row) => ({
     orderNo: field(row, columnName(orderMap, 'orderNo'), 'orderNo', '订单号'), sequenceNo: field(row, columnName(orderMap, 'sequenceNo'), 'sequenceNo', '序号', '订单序号'),
     mealPeriod: field(row, columnName(orderMap, 'mealPeriod'), 'mealPeriod', '用餐时段'), packageName: field(row, columnName(orderMap, 'packageName'), 'packageName', '套餐名称'),
     price: field(row, columnName(orderMap, 'price'), 'price', '价格'), mainMeat: field(row, columnName(orderMap, 'mainMeat'), 'mainMeat', '主荤', '主肉'), sideMeat: field(row, columnName(orderMap, 'sideMeat'), 'sideMeat', '副荤', '半荤'),
     name: field(row, columnName(orderMap, 'name'), 'name', '姓名'), phone: field(row, columnName(orderMap, 'phone'), 'phone', '手机号码', '电话')
   }));
   const statsRows = rowsFrom(await seaTable(env, env.SEATABLE_STATS_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(statsMap, 'orderDate'), 'orderDate', '日期')) === targetDate);
-  const totals = {};
-  statsRows.forEach((row) => { const name = clean(field(row, columnName(statsMap, 'dishName'), 'dishName', '菜名', '菜品名称'), 80); if (!name) return; const group = clean(field(row, columnName(statsMap, 'dishGroup'), 'dishGroup', '分组'), 30); totals[`${group}::${name}`] = (totals[`${group}::${name}`] || 0) + numberOr(field(row, columnName(statsMap, 'quantity'), 'quantity', '份数'), 1); });
-  const stats = Object.entries(totals).map(([key, quantity]) => { const [group, dishName] = key.split('::'); return { group, dishName, quantity }; }).sort((a, b) => a.group.localeCompare(b.group) || a.dishName.localeCompare(b.dishName));
-  return { date: targetDate, orders, stats, historyRetentionDays: 7 };
+  const totals = { lunch: {}, dinner: {} };
+  statsRows.forEach((row) => {
+    if (targetDate === beijingDate() && orderSequence(row, statsMap) <= archiveSequence) return;
+    const name = clean(field(row, columnName(statsMap, 'dishName'), 'dishName', '菜名', '菜品名称'), 80); if (!name) return;
+    const group = clean(field(row, columnName(statsMap, 'dishGroup'), 'dishGroup', '分组'), 30);
+    const meal = /晚餐|dinner/i.test(String(field(row, columnName(statsMap, 'mealPeriod'), 'mealPeriod', '用餐时段', '餐段'))) ? 'dinner' : 'lunch';
+    const key = `${group}::${name}`; totals[meal][key] = (totals[meal][key] || 0) + numberOr(field(row, columnName(statsMap, 'quantity'), 'quantity', '份数'), 1);
+  });
+  const toStats = (mealTotals) => Object.entries(mealTotals).map(([key, quantity]) => { const [group, dishName] = key.split('::'); return { group, dishName, quantity }; }).sort((a, b) => a.group.localeCompare(b.group) || a.dishName.localeCompare(b.dishName));
+  const statsByMealPeriod = { lunch: toStats(totals.lunch), dinner: toStats(totals.dinner) };
+  return { date: targetDate, orders, stats: [...statsByMealPeriod.lunch, ...statsByMealPeriod.dinner], statsByMealPeriod, archiveSequence, historyRetentionDays: 7 };
+}
+
+async function archiveToday(env) {
+  const today = beijingDate();
+  const orderMap = { ...ORDER_DEFAULT_COLUMNS, ...parseMap(env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP') };
+  const orders = rowsFrom(await seaTable(env, env.SEATABLE_TABLE_NAME, 'GET')).filter((row) => dateOnly(field(row, columnName(orderMap, 'orderDate'), 'orderDate', '日期')) === today);
+  const sequence = orders.reduce((max, row) => Math.max(max, orderSequence(row, orderMap)), 0);
+  if (!sequence) return { archivedThrough: 0, archivedOrders: 0 };
+  const table = clean(env.SEATABLE_MENU_TABLE_NAME, 100);
+  const configuredMap = parseMap(env.SEATABLE_MENU_COLUMN_MAP, 'SEATABLE_MENU_COLUMN_MAP');
+  const menuRows = await readMenuRows(env); const map = resolveMenuMap(menuRows, configuredMap);
+  const key = `archiveSequence:${today}`;
+  const row = { [columnName(map, 'type')]: '设置', [columnName(map, 'key')]: key, [columnName(map, 'value')]: String(sequence), [columnName(map, 'enabled')]: true, [columnName(map, 'published')]: true };
+  const matches = menuRows.filter((item) => ['setting', '设置'].includes(clean(field(item, columnName(map, 'type'), 'type', '类型'), 30).toLowerCase()) && clean(field(item, columnName(map, 'key'), 'key', '键'), 100) === key);
+  if (matches.length) await seaTable(env, table, 'PUT', matches.filter((item) => item?._id).map((item) => ({ row_id: item._id, row })));
+  else await seaTable(env, table, 'POST', row);
+  return { archivedThrough: sequence, archivedOrders: orders.filter((item) => orderSequence(item, orderMap) <= sequence).length };
 }
 
 function normalizeMenu(rows, map) {
@@ -192,6 +232,10 @@ export async function onRequest(context) {
     }
     if (context.request.method === 'POST') {
       const payload = await context.request.json();
+      if (payload?.archiveToday) {
+        const archived = await archiveToday(context.env);
+        return json({ ok: true, archived, ...(await readLive(context.env)) });
+      }
       if (payload?.quickOnly) return json({ ok: true, menu: await saveSettings(context.env, payload.settings || {}) });
       return json({ ok: true, menu: await saveMenu(context.env, payload) });
     }

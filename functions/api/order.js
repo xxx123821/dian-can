@@ -214,7 +214,17 @@ function buildStatsRows(input, map, orderNo, orderDate, sequenceNo) {
       [columnName(map, 'name')]: input.name, [columnName(map, 'phone')]: input.phone
     });
   });
-  add(input.mainMeat, '主荤'); add(input.sideMeat, '副荤'); return result;
+  add(input.mainMeat, '主荤'); add(input.sideMeat, '副荤');
+  if (!input.mainMeat && !input.sideMeat && /减脂餐/.test(input.packageName)) {
+    result.push({
+      [columnName(map, 'orderNo')]: orderNo, [columnName(map, 'orderDate')]: orderDate,
+      [columnName(map, 'sequenceNo')]: sequenceNo, [columnName(map, 'mealPeriod')]: input.mealPeriod,
+      [columnName(map, 'dishGroup')]: '套餐', [columnName(map, 'dishName')]: '减脂餐',
+      [columnName(map, 'quantity')]: 1, [columnName(map, 'packageName')]: input.packageName,
+      [columnName(map, 'name')]: input.name, [columnName(map, 'phone')]: input.phone
+    });
+  }
+  return result;
 }
 
 export async function onRequestPost({ request, env }) {
