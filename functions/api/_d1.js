@@ -15,20 +15,18 @@ let schemaPromise;
 export function d1Enabled(env) { return Boolean(env?.DB && typeof env.DB.prepare === 'function'); }
 export async function ensureD1(db) { if (!schemaPromise) schemaPromise = db.exec(SCHEMA); await schemaPromise; }
 let cleanupPromise;
-let lastCleanupAt = 0;
+let lastCleanupDate = '';
 const HISTORY_DAYS = 7;
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 function dateBeforeToday(days) {
   const today = beijingDate();
   return new Date(Date.parse(`${today}T00:00:00Z`) - days * 86400000).toISOString().slice(0, 10);
 }
 // Keep only the latest seven Beijing calendar dates. Cleanup is triggered by
-// normal D1 traffic and throttled per Worker isolate so it does not add a
-// delete query to every customer request.
+// normal D1 traffic and runs at most once per Beijing date per Worker isolate.
 export async function cleanupD1OldData(db) {
-  const now = Date.now();
+  const today = beijingDate();
   if (cleanupPromise) return cleanupPromise;
-  if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) return null;
+  if (lastCleanupDate === today) return null;
   cleanupPromise = (async () => {
     await ensureD1(db);
     const cutoff = dateBeforeToday(HISTORY_DAYS - 1);
@@ -37,7 +35,7 @@ export async function cleanupD1OldData(db) {
       db.prepare('DELETE FROM orders WHERE order_date < ?').bind(cutoff),
       db.prepare('DELETE FROM daily_sequences WHERE order_date < ?').bind(cutoff)
     ]);
-    lastCleanupAt = Date.now();
+    lastCleanupDate = today;
     return { cutoff, historyDays: HISTORY_DAYS };
   })().finally(() => { cleanupPromise = null; });
   return cleanupPromise;
