@@ -44,6 +44,11 @@ function resolveMenuMap(rows, configured) {
 async function seaTable(env, tableName, method = 'GET', row = null, rowId = '') {
   return seaTableRequest(env, tableName, method, row, rowId);
 }
+async function seaTableBatches(env, tableName, method, rows, batchSize = 25) {
+  for (let offset = 0; offset < rows.length; offset += batchSize) {
+    await seaTable(env, tableName, method, rows.slice(offset, offset + batchSize));
+  }
+}
 function assertAdmin(request, env) {
   const configuredPassword = clean(env.ADMIN_PASSWORD, 300);
   if (configuredPassword) {
@@ -192,8 +197,10 @@ async function saveMenu(env, payload) {
   }
   // One batch request per operation keeps the save well below Cloudflare's
   // Worker subrequest limit, even when the menu has many dishes/settings.
-  if (updates.length) await seaTable(env, table, 'PUT', updates);
-  if (inserts.length) await seaTable(env, table, 'POST', inserts);
+  // Keep each write small enough for SeaTable to process reliably when a
+  // merchant has entered many dishes at once.
+  if (updates.length) await seaTableBatches(env, table, 'PUT', updates, 25);
+  if (inserts.length) await seaTableBatches(env, table, 'POST', inserts, 40);
   return normalizeMenu(await readMenuRows(env), map);
 }
 
@@ -218,8 +225,8 @@ async function saveSettings(env, settings) {
     if (oldRows.length) for (const old of oldRows) if (old?._id) updates.push({ row_id: old._id, row });
     else inserts.push(row);
   }
-  if (updates.length) await seaTable(env, table, 'PUT', updates);
-  if (inserts.length) await seaTable(env, table, 'POST', inserts);
+  if (updates.length) await seaTableBatches(env, table, 'PUT', updates, 25);
+  if (inserts.length) await seaTableBatches(env, table, 'POST', inserts, 40);
   return normalizeMenu(await readMenuRows(env), map);
 }
 
