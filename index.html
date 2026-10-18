@@ -21,6 +21,8 @@
         mainMeat: ['红烧肉', '香辣鸡腿', '梅菜扣肉', '卤鸡翅'],
         sideMeat: ['鱼香茄子', '青椒肉丝', '土豆炖鸡', '番茄炒蛋', '家常豆腐']
       },
+      // 单品类型及其固定包含的菜名；线上菜单会覆盖这里的预览配置
+      singles: [],
       // 时间均按北京时间；商家尚未保存设置时，先默认全天可点。
       mealSchedule: {
         lunch: { label: '午餐', start: '00:00', end: '23:59' },
@@ -171,8 +173,10 @@
         <div class="validation warn" id="contactValidation" aria-live="polite"></div>
       </div>
       <div class="section">
-        <div class="section-title"><h2>选择套餐</h2><span class="hint">二选一</span></div>
+        <div class="section-title"><h2 id="productSectionTitle">选择套餐</h2><span class="hint" id="productSectionHint">请选择一种</span></div>
+        <div class="meal-tabs" id="orderModeTabs" style="margin-bottom:10px"></div>
         <div class="package-tabs" id="packageTabs"></div>
+        <div class="package-tabs" id="singleTabs" style="display:none"></div>
       </div>
 
       <div class="section">
@@ -183,6 +187,10 @@
         <div class="selection-group">
           <div class="selection-heading"><b>副荤</b><span class="count" id="sideCount"></span></div>
           <div class="check-list" id="sideList"></div>
+        </div>
+        <div class="selection-group" id="singleDishesGroup" style="display:none">
+          <div class="selection-heading"><b>单品内容</b><span class="count">固定包含</span></div>
+          <div class="check-list" id="singleDishesList"></div>
         </div>
         <div class="validation" id="validation" aria-live="polite"></div>
       </div>
@@ -236,7 +244,7 @@
   </div>
 
   <script>
-    const state = { packageKey: 'A', mealPeriod: '', main: new Set(), side: new Set(), orderNo: '', draftPayload: null, isSubmitting: false, isLoadingPreview: false, submitted: false };
+    const state = { orderMode: 'package', packageKey: 'A', singleKey: '', mealPeriod: '', main: new Set(), side: new Set(), orderNo: '', draftPayload: null, isSubmitting: false, isLoadingPreview: false, submitted: false };
     const $ = (id) => document.getElementById(id);
 
     function escapeHtml(value) {
@@ -245,9 +253,10 @@
 
     function activeMenu() {
       const scoped = CONFIG.mealMenus?.[state.mealPeriod];
-      return scoped || { packages: CONFIG.packages, dishes: CONFIG.dishes };
+      return scoped || { packages: CONFIG.packages, singles: CONFIG.singles || [], dishes: CONFIG.dishes };
     }
     function currentPackage() { return activeMenu().packages[state.packageKey] || Object.values(activeMenu().packages)[0]; }
+    function currentSingle() { const list = activeMenu().singles || []; return list.find((item) => item.key === state.singleKey) || list[0]; }
 
     function minutes(value) {
       const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
@@ -296,8 +305,10 @@
       if (previousMeal !== state.mealPeriod && $('packageTabs')) {
         const packages = activeMenu().packages || {};
         state.packageKey = packages[state.packageKey] ? state.packageKey : (Object.keys(packages)[0] || '');
+        const singles = activeMenu().singles || [];
+        state.singleKey = singles.some((item) => item.key === state.singleKey) ? state.singleKey : (singles[0]?.key || '');
         state.main.clear(); state.side.clear();
-        renderPackages(); renderDishes();
+        renderProducts(); renderDishes();
       }
       const availableKeys = new Set(available.map((item) => item.key));
       $('mealTabs').innerHTML = scheduleEntries.length ? scheduleEntries.map((item) => {
@@ -309,9 +320,11 @@
         state.mealPeriod = button.dataset.meal;
         const packages = activeMenu().packages || {};
         if (!packages[state.packageKey]) state.packageKey = Object.keys(packages)[0] || '';
+        const singles = activeMenu().singles || [];
+        if (!singles.some((item) => item.key === state.singleKey)) state.singleKey = singles[0]?.key || '';
         state.main.clear(); state.side.clear();
         renderMealTabs();
-        renderPackages(); renderDishes();
+        renderProducts(); renderDishes();
         updateStatus();
       }));
       const now = beijingMinutes();
@@ -326,9 +339,25 @@
       $('draftPanel').classList.remove('show');
     }
 
+    function renderOrderModes() {
+      const hasSingles = Boolean((activeMenu().singles || []).length);
+      const hasPackages = Boolean(Object.keys(activeMenu().packages || {}).length);
+      if (!hasSingles && state.orderMode === 'single') state.orderMode = 'package';
+      if (!hasPackages && hasSingles) state.orderMode = 'single';
+      $('orderModeTabs').innerHTML = (hasPackages && hasSingles) ? `
+        <button type="button" class="meal-tab ${state.orderMode === 'package' ? 'active' : ''}" data-mode="package">套餐</button>
+        <button type="button" class="meal-tab ${state.orderMode === 'single' ? 'active' : ''}" data-mode="single">单品</button>` : '';
+      $('productSectionTitle').textContent = state.orderMode === 'single' ? '选择单品' : '选择套餐';
+      $('productSectionHint').textContent = state.orderMode === 'single' ? '选择一种单品' : '请选择一种';
+      document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => {
+        invalidateDraft(); state.orderMode = button.dataset.mode; state.main.clear(); state.side.clear();
+        renderProducts(); renderDishes(); updateStatus();
+      }));
+    }
+
     function renderPackages() {
       const packages = activeMenu().packages || {};
-      renderPackageRules();
+      $('packageTabs').style.display = state.orderMode === 'package' ? '' : 'none';
       $('packageTabs').innerHTML = Object.entries(packages).map(([key, item]) => `
         <button type="button" class="package-tab ${key === state.packageKey ? 'active' : ''}" data-package="${escapeHtml(key)}">
           <strong>${escapeHtml(item.name)} · ¥${Number(item.price).toFixed(0)}</strong>
@@ -336,15 +365,33 @@
         </button>`).join('');
       document.querySelectorAll('[data-package]').forEach((button) => button.addEventListener('click', () => {
         invalidateDraft();
-        state.packageKey = button.dataset.package;
+        state.orderMode = 'package'; state.packageKey = button.dataset.package;
         state.main.clear();
         state.side.clear();
-        renderPackages(); renderDishes(); updateStatus();
+        renderProducts(); renderDishes(); updateStatus();
       }));
       const pkg = currentPackage();
       $('summaryName').textContent = pkg ? pkg.name : '暂无可用套餐';
       $('price').textContent = pkg ? `¥${Number(pkg.price).toFixed(0)}` : '¥0';
     }
+
+    function renderSingles() {
+      const singles = activeMenu().singles || [];
+      $('singleTabs').style.display = state.orderMode === 'single' ? '' : 'none';
+      $('singleTabs').innerHTML = singles.map((item) => `
+        <button type="button" class="package-tab ${item.key === state.singleKey ? 'active' : ''}" data-single="${escapeHtml(item.key)}">
+          <strong>${escapeHtml(item.name)} · ¥${Number(item.price).toFixed(0)}</strong>
+          <span>${item.dishes?.length ? `包含：${escapeHtml(item.dishes.join('、'))}` : '暂无固定菜名'}</span>
+        </button>`).join('') || '<div class="hint">当前餐段暂无可用单品</div>';
+      document.querySelectorAll('[data-single]').forEach((button) => button.addEventListener('click', () => {
+        invalidateDraft(); state.orderMode = 'single'; state.singleKey = button.dataset.single; state.main.clear(); state.side.clear(); renderProducts(); renderDishes(); updateStatus();
+      }));
+      const single = currentSingle();
+      $('summaryName').textContent = single ? single.name : '暂无可用单品';
+      $('price').textContent = single ? `¥${Number(single.price).toFixed(0)}` : '¥0';
+    }
+
+    function renderProducts() { renderOrderModes(); renderPackages(); renderSingles(); renderPackageRules(); }
 
     // 微信等内置浏览器有时会把返回前台的页面从 BFCache 恢复；强制重载，
     // 让恢复页面也重新向商家菜单接口确认时段和菜品。
@@ -373,6 +420,16 @@
     function renderDishes() {
       const pkg = currentPackage();
       const dishes = activeMenu().dishes || CONFIG.dishes;
+      const single = currentSingle();
+      const singleMode = state.orderMode === 'single';
+      const singleGroup = $('singleDishesGroup');
+      if (singleGroup) singleGroup.style.display = singleMode ? '' : 'none';
+      if (singleMode) {
+        $('mainList').innerHTML = ''; $('sideList').innerHTML = '';
+        $('mainList').closest('.selection-group').style.display = 'none'; $('sideList').closest('.selection-group').style.display = 'none';
+        $('singleDishesList').innerHTML = single?.dishes?.length ? single.dishes.map((dish) => `<div class="check-row"><label>${escapeHtml(dish)}</label></div>`).join('') : '<div class="hint">该单品暂未设置固定菜名</div>';
+        return;
+      }
       if (!pkg) { $('mainList').innerHTML = '<div class="hint">当前时段暂无套餐</div>'; $('sideList').innerHTML = ''; return; }
       const mainGroup = $('mainList').closest('.selection-group');
       const sideGroup = $('sideList').closest('.selection-group');
@@ -428,6 +485,17 @@
     }
 
     function updateStatus() {
+      if (state.orderMode === 'single') {
+        const single = currentSingle(); const contact = updateContactStatus();
+        $('mainCount').textContent = '—'; $('sideCount').textContent = '—';
+        const valid = Boolean(currentMeal()) && Boolean(single) && contact.valid;
+        $('validation').className = `validation ${valid ? 'ok' : 'warn'}`;
+        $('validation').textContent = !currentMeal() ? '当前不在开放点餐时间' : (!single ? '当前时段暂无可用单品' : (contact.valid ? '单品已选择，可以提交' : '请先补充联系信息'));
+        $('submitBtn').disabled = !valid || isClosed() || state.isSubmitting || state.isLoadingPreview || state.submitted || Boolean(state.draftPayload);
+        $('submitBtn').style.display = state.draftPayload ? 'none' : 'block'; $('confirmBtn').style.display = state.draftPayload ? 'block' : 'none';
+        $('summaryName').textContent = single ? single.name : '暂无可用单品'; $('price').textContent = single ? `¥${Number(single.price).toFixed(0)}` : '¥0';
+        return;
+      }
       const pkg = currentPackage();
       if (!pkg) {
         $('mainCount').textContent = '0/0';
@@ -549,7 +617,7 @@
           <div class="saved-order-head"><span>取餐号 ${escapeHtml(order.sequenceNo || '—')} · ${escapeHtml(order.orderNo || '')}</span><span>¥${escapeHtml(order.price ?? '')}</span></div>
           <div class="saved-order-time">${escapeHtml(order.orderDate || '')} ${escapeHtml(mealSchedule()[order.mealPeriod]?.label || order.mealPeriod || '')} · ${escapeHtml(formatOrderTime(order.submittedAt))}</div>
           <div>${escapeHtml(order.packageName || '')}</div>
-          <div class="saved-order-dishes">主荤：${escapeHtml(order.mainMeat || '—')}；副荤：${escapeHtml(order.sideMeat || '—')}</div>
+          <div class="saved-order-dishes">${order.orderType === 'single' ? `单品菜名：${escapeHtml(order.singleDishes || '—')}` : `主荤：${escapeHtml(order.mainMeat || '—')}；副荤：${escapeHtml(order.sideMeat || '—')}`}</div>
         </div>`).join('');
     }
 
@@ -567,9 +635,17 @@
     }
 
     function buildOrderPayload(orderNo) {
+      if (state.orderMode === 'single') {
+        const single = currentSingle();
+        return {
+          orderNo, orderType: 'single', singleKey: single?.key || '', singleDishes: (single?.dishes || []).join('、'),
+          packageName: single?.name || '', price: Number(single?.price || 0), mealPeriod: state.mealPeriod,
+          mainMeat: '', sideMeat: '', name: $('customerName').value.trim(), phone: normalizePhone($('customerPhone').value)
+        };
+      }
       const pkg = currentPackage();
       return {
-        orderNo,
+        orderNo, orderType: 'package', singleKey: '', singleDishes: '',
         packageName: pkg.name,
         price: Number(pkg.price),
         mealPeriod: state.mealPeriod,
@@ -586,7 +662,8 @@
       if ((!menu.mealMenus && (!menu.dishes || !Array.isArray(menu.dishes.mainMeat) || !Array.isArray(menu.dishes.sideMeat)))) throw new Error('菜单数据中菜品格式错误');
       const mealMenus = menu.mealMenus || {};
       const hasPackages = Object.keys(menu.packages || {}).length || Object.values(mealMenus).some((item) => Object.keys(item?.packages || {}).length);
-      const hasDishes = (menu.dishes?.mainMeat?.length || menu.dishes?.sideMeat?.length) || Object.values(mealMenus).some((item) => item?.dishes?.mainMeat?.length || item?.dishes?.sideMeat?.length);
+      const hasSingles = (menu.singles?.length || 0) || Object.values(mealMenus).some((item) => item?.singles?.length);
+      const hasDishes = (menu.dishes?.mainMeat?.length || menu.dishes?.sideMeat?.length) || hasSingles || Object.values(mealMenus).some((item) => item?.dishes?.mainMeat?.length || item?.dishes?.sideMeat?.length);
       // Apply valid remote fields independently. A partially configured menu
       // must not hide the local dish fallback or prevent contact/schedule
       // updates from reaching customers.
@@ -595,9 +672,11 @@
       if (menu.mealMenus && typeof menu.mealMenus === 'object') {
         CONFIG.mealMenus = menu.mealMenus;
         CONFIG.packages = menu.packages || {};
+        CONFIG.singles = menu.singles || [];
         CONFIG.dishes = menu.dishes || { mainMeat: [], sideMeat: [] };
       } else {
         CONFIG.packages = menu.packages || {};
+        CONFIG.singles = menu.singles || [];
         CONFIG.dishes = menu.dishes || { mainMeat: [], sideMeat: [] };
         CONFIG.mealMenus = null;
       }
@@ -607,6 +686,8 @@
       if (Object.prototype.hasOwnProperty.call(menu, 'contactPhone')) CONFIG.contactPhone = String(menu.contactPhone || '');
       const packages = activeMenu().packages || CONFIG.packages;
       if (!packages[state.packageKey]) state.packageKey = Object.keys(packages)[0] || '';
+      const singles = activeMenu().singles || CONFIG.singles || [];
+      if (!singles.some((item) => item.key === state.singleKey)) state.singleKey = singles[0]?.key || '';
       state.main.clear();
       state.side.clear();
       if (menu.menuWarning || !hasDishes) {
@@ -642,15 +723,17 @@
 
     function renderPackageRules() {
       const packages = Object.values(activeMenu().packages || {});
-      if (!packages.length) {
-        $('packageRules').innerHTML = '当前餐段暂无上架套餐。';
+      const singles = activeMenu().singles || [];
+      if (!packages.length && !singles.length) {
+        $('packageRules').innerHTML = '当前餐段暂无上架套餐或单品。';
         return;
       }
       const lines = packages.map((item) => {
         const rule = item.mainCount === 0 && item.sideCount === 0 ? '每日固定' : `${item.mainCount}主荤 + ${item.sideCount}副荤`;
         return `【${escapeHtml(item.name)}（${rule}）】👉 ${Number(item.price) || 0}元`;
       });
-      $('packageRules').innerHTML = `套餐价格：<br>${lines.join('<br>')}<span class="soup-in-rules">备注:任意套餐均赠送例汤</span>`;
+      const singleLines = singles.map((item) => `【${escapeHtml(item.name)}（单品）】👉 ${Number(item.price) || 0}元`);
+      $('packageRules').innerHTML = `${packages.length ? `套餐价格：<br>${lines.join('<br>')}` : ''}${singleLines.length ? `${packages.length ? '<br>' : ''}单品价格：<br>${singleLines.join('<br>')}` : ''}<span class="soup-in-rules">备注:任意套餐均赠送例汤</span>`;
     }
 
     function showDraft(payload) {
@@ -658,7 +741,7 @@
       $('draftMeal').textContent = mealSchedule()[payload.mealPeriod]?.label || payload.mealPeriod;
       $('draftContact').textContent = `${payload.name} · ${payload.phone}`;
       $('draftPackage').textContent = payload.packageName;
-      $('draftDishes').textContent = `主荤：${payload.mainMeat}；副荤：${payload.sideMeat}`;
+      $('draftDishes').textContent = payload.orderType === 'single' ? `单品菜名：${payload.singleDishes || '—'}` : `主荤：${payload.mainMeat}；副荤：${payload.sideMeat}`;
       $('draftPrice').textContent = `¥${Number(payload.price).toFixed(0)}`;
       $('draftPanel').classList.add('show');
     }
@@ -668,7 +751,8 @@
       updateStatus();
       const pkg = currentPackage();
       const contact = updateContactStatus();
-      if (!pkg || !currentMeal() || state.main.size !== pkg.mainCount || state.side.size !== pkg.sideCount || !contact.valid) {
+      const single = state.orderMode === 'single' ? currentSingle() : null;
+      if ((!pkg && !single) || !currentMeal() || (state.orderMode === 'package' && (state.main.size !== pkg.mainCount || state.side.size !== pkg.sideCount)) || !contact.valid) {
         alert('当前不在开放时段，或套餐菜品数量、联系人信息不符合要求');
         return;
       }
@@ -756,7 +840,7 @@
       const dinner = CONFIG.mealSchedule.dinner;
       $('mealScheduleNotice').textContent = `点餐时段：${lunch.label} ${lunch.start} 开始，${lunch.end} 结束；${dinner.label} ${dinner.start} 开始，${dinner.end} 结束。`;
       $('orderCard').style.display = '';
-      renderPackages(); renderDishes(); updateStatus(); refreshDeadline();
+      renderProducts(); renderDishes(); updateStatus(); refreshDeadline();
       window.setInterval(refreshDeadline, 1000);
       window.setInterval(renderTodayTitle, 60000);
     }
