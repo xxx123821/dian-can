@@ -6,11 +6,13 @@ const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
 // Worker isolate (the token itself is never sent to the browser).
 const tokenCache = new Map();
 const TOKEN_CACHE_MS = 5 * 60 * 1000;
-const REQUEST_TIMEOUT_MS = 12000;
+const TOKEN_TIMEOUT_MS = 12000;
+const READ_TIMEOUT_MS = 20000;
+const WRITE_TIMEOUT_MS = 45000;
 
-async function fetchWithTimeout(url, options = {}) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = READ_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try { return await fetch(url, { ...options, signal: controller.signal }); }
   finally { clearTimeout(timer); }
 }
@@ -24,7 +26,7 @@ async function exchangeToken(origin, apiToken) {
     const response = await fetchWithTimeout(`${origin}/api/v2.1/dtable/app-access-token/`, {
       headers: { Authorization: `Bearer ${apiToken}` },
       cache: 'no-store'
-    });
+    }, TOKEN_TIMEOUT_MS);
     const text = await response.text();
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch (_) { }
@@ -92,7 +94,7 @@ export async function seaTableRequest(env, tableName, method = 'GET', row = null
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: requestMethod === 'GET' ? undefined : JSON.stringify(body),
       cache: 'no-store'
-    });
+    }, requestMethod === 'GET' ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS);
   const attempts = [];
   try {
     const candidates = [{ url: endpoint, body: requestBody, method }];
