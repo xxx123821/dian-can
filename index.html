@@ -502,7 +502,6 @@
 
     function showSuccess(orderNo, sequenceNo) {
       $('modalOrderNo').textContent = orderNo;
-      $('modalOrderNoTiny').textContent = orderNo;
       $('modalTitle').textContent = '订单提交成功';
       $('modalMessage').innerHTML = `订单已写入系统。<br>当天取餐序号：${sequenceNo || '—'}`;
       state.orderNo = orderNo;
