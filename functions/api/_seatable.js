@@ -7,7 +7,10 @@ const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
 const tokenCache = new Map();
 const TOKEN_CACHE_MS = 5 * 60 * 1000;
 const TOKEN_TIMEOUT_MS = 12000;
-const READ_TIMEOUT_MS = 20000;
+// SeaTable Cloud response time can fluctuate well above ten seconds. Keep
+// reads long enough for the merchant dashboard while the customer page has
+// its own shorter UI timeout and never waits indefinitely.
+const READ_TIMEOUT_MS = 45000;
 const WRITE_TIMEOUT_MS = 45000;
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = READ_TIMEOUT_MS) {
