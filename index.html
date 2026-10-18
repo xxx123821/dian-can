@@ -190,8 +190,8 @@
       <div class="submit-wrap">
         <div class="draft" id="draftPanel" aria-live="polite">
           <div class="draft-title">请核对订单，确认后正式提交</div>
-          <div class="hint" style="margin-bottom:6px">预计取餐序号仅供核对；提交成功后以最终订单号为准。</div>
-          <div class="draft-row"><span>预计取餐序号</span><strong id="draftOrderNo"></strong></div>
+          <div class="hint" style="margin-bottom:6px">预计取餐号仅供核对；提交成功后以最终取餐号为准。</div>
+          <div class="draft-row"><span>预计取餐号</span><strong id="draftOrderNo"></strong></div>
           <div class="draft-row"><span>用餐时段</span><strong id="draftMeal"></strong></div>
           <div class="draft-row"><span>联系人</span><strong id="draftContact"></strong></div>
           <div class="draft-row"><span>套餐</span><strong id="draftPackage"></strong></div>
@@ -201,7 +201,7 @@
           <button class="secondary" id="editBtn" type="button">返回修改</button>
         </div>
         <button class="primary" id="submitBtn" type="button">生成订单</button>
-        <p class="payment-note">请在群里直接向群主转账订餐金额，祝您用餐愉快！</p>
+        <p class="payment-note">请在群里直接向群主转账订餐金额并备注取餐序号，祝你用餐愉快！</p>
         <div class="deadline" id="deadlineText"></div>
       </div>
     </section>
@@ -229,7 +229,7 @@
         <button class="secondary" id="closeModal" type="button">关闭</button>
         <button class="primary" id="reorderBtn" type="button">再点一份</button>
       </div>
-      <p class="tiny">请在群里直接向群主转账订餐金额，祝您用餐愉快！</p>
+      <p class="tiny">请在群里直接向群主转账订餐金额并备注取餐序号，祝你用餐愉快！</p>
     </div>
   </div>
 
@@ -510,7 +510,7 @@
     function showSuccess(orderNo, sequenceNo) {
       $('modalOrderNo').textContent = orderNo;
       $('modalTitle').textContent = '订单提交成功';
-      $('modalMessage').innerHTML = `订单已写入系统。<br>当天取餐序号：${sequenceNo || '—'}`;
+      $('modalMessage').innerHTML = `订单已写入系统。<br>当天取餐号：${sequenceNo || '—'}`;
       state.orderNo = orderNo;
       $('successModal').classList.add('show');
     }
@@ -544,7 +544,7 @@
       card.style.display = 'block';
       $('orderHistoryList').innerHTML = orders.map((order) => `
         <div class="saved-order">
-          <div class="saved-order-head"><span>序号 ${escapeHtml(order.sequenceNo || '—')} · ${escapeHtml(order.orderNo || '')}</span><span>¥${escapeHtml(order.price ?? '')}</span></div>
+          <div class="saved-order-head"><span>取餐号 ${escapeHtml(order.sequenceNo || '—')} · ${escapeHtml(order.orderNo || '')}</span><span>¥${escapeHtml(order.price ?? '')}</span></div>
           <div class="saved-order-time">${escapeHtml(order.orderDate || '')} ${escapeHtml(mealSchedule()[order.mealPeriod]?.label || order.mealPeriod || '')} · ${escapeHtml(formatOrderTime(order.submittedAt))}</div>
           <div>${escapeHtml(order.packageName || '')}</div>
           <div class="saved-order-dishes">主荤：${escapeHtml(order.mainMeat || '—')}；副荤：${escapeHtml(order.sideMeat || '—')}</div>
