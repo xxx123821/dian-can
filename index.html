@@ -100,6 +100,7 @@
     .price { font-size: 22px; font-weight: 700; }
     .submit-wrap { padding: 14px 16px 17px; background: #fafafa; border-top: 1px solid var(--line); }
     .payment-note { margin: 10px 2px 0; color: #333; text-align: center; font-size: 16px; font-weight: 600; line-height: 1.6; }
+    .payment-note-emphasis { color: #c62828; font-weight: 800; }
     .order-history { padding: 15px 16px; }
     .order-history h2 { margin: 0 0 10px; font-size: 16px; }
     .saved-order { padding: 11px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.6; }
@@ -127,7 +128,8 @@
     .modal-backdrop.show { display: flex; }
     .modal { width: min(100%, 380px); background: #fff; border-radius: 12px; padding: 22px 18px 17px; box-shadow: 0 10px 35px rgba(0,0,0,.2); text-align: center; }
     .modal h2 { font-size: 18px; margin: 0 0 12px; }
-    .order-no { display: inline-block; padding: 7px 11px; border-radius: 5px; background: #f3f3f3; font-size: 18px; font-weight: 700; letter-spacing: .04em; }
+    .order-no { display: inline-block; padding: 7px 11px; border-radius: 5px; background: #f3f3f3; font-size: 22px; font-weight: 800; letter-spacing: .04em; }
+    .pickup-number { display: inline-block; margin-left: 4px; font-size: 25px; font-weight: 800; }
     .modal p { color: #555; font-size: 13px; line-height: 1.65; margin: 13px 0; }
     .modal-actions { display: grid; gap: 8px; margin-top: 13px; }
     .tiny { color: #999; font-size: 11px; margin: 10px 0 0; }
@@ -201,7 +203,7 @@
           <button class="secondary" id="editBtn" type="button">返回修改</button>
         </div>
         <button class="primary" id="submitBtn" type="button">生成订单</button>
-        <p class="payment-note">请在群里直接向群主转账订餐金额并备注取餐号，祝你用餐愉快！</p>
+        <p class="payment-note">请在群里直接向群主转账订餐金额<span class="payment-note-emphasis">并备注取餐序号</span>，祝你用餐愉快！</p>
         <div class="deadline" id="deadlineText"></div>
       </div>
     </section>
@@ -229,7 +231,7 @@
         <button class="secondary" id="closeModal" type="button">关闭</button>
         <button class="primary" id="reorderBtn" type="button">再点一份</button>
       </div>
-      <p class="tiny">请在群里直接向群主转账订餐金额并备注取餐号，祝你用餐愉快！</p>
+      <p class="tiny">请在群里直接向群主转账订餐金额<span class="payment-note-emphasis">并备注取餐序号</span>，祝你用餐愉快！</p>
     </div>
   </div>
 
@@ -510,7 +512,7 @@
     function showSuccess(orderNo, sequenceNo) {
       $('modalOrderNo').textContent = orderNo;
       $('modalTitle').textContent = '订单提交成功';
-      $('modalMessage').innerHTML = `订单已写入系统。<br>当天取餐号：${sequenceNo || '—'}`;
+      $('modalMessage').innerHTML = `订单已写入系统。<br>当天取餐号：<span class="pickup-number">${escapeHtml(sequenceNo || '—')}</span>`;
       state.orderNo = orderNo;
       $('successModal').classList.add('show');
     }
