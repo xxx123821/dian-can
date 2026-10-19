@@ -281,6 +281,14 @@ export async function onRequestPost({ request, env }) {
 export async function onRequest(context) {
   if (d1Enabled(context.env)) {
     if (context.request.method === 'GET') {
+      if (new URL(context.request.url).searchParams.get('debug') === '1') {
+        try {
+          await ensureD1(context.env.DB);
+          const config = await readD1Config(context.env.DB);
+          const now = beijingNow();
+          return json({ ok: true, schedule: d1Schedule(config), now });
+        } catch (error) { return json({ ok: false, error: error.message || '调试信息读取失败' }, 502); }
+      }
       if (new URL(context.request.url).searchParams.get('preview') === '1') { try { await ensureD1(context.env.DB); const now = beijingNow(); const sequenceNo = await peekD1Sequence(context.env.DB, now.date); return json({ ok: true, orderNo: String(sequenceNo), sequenceNo, orderDate: now.date, provisional: true }); } catch (error) { return json({ ok: false, error: error.message || '无法获取当前取餐号' }, 502); } }
       return json({ ok: true, service: 'order', configured: true, storage: 'd1' });
     }
