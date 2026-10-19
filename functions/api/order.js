@@ -231,6 +231,12 @@ async function onRequestPostD1({ request, env }) {
   if (!input.packageName || !input.mealPeriod || !Number.isFinite(input.price) || !input.name || !/^1[3-9]\d{9}$/.test(input.phone)) return json({ ok: false, error: '订单信息不完整或格式不正确' }, 400);
   try {
     await ensureD1(env.DB); await cleanupD1OldData(env.DB); const config = await readD1Config(env.DB); const now = beijingNow();
+    if (raw.checkSchedule === true) {
+      const schedule = d1Schedule(config);
+      let allowed = true; let reason = '';
+      try { assertD1MealOpen(schedule, input.mealPeriod, now.minutes); } catch (error) { allowed = false; reason = error.message; }
+      return json({ ok: true, service: 'order', storage: 'd1', schedule, now, requestedPeriod: input.mealPeriod, allowed, reason });
+    }
     assertD1MealOpen(d1Schedule(config), input.mealPeriod, now.minutes);
     validateD1Order(input, config); const sequenceNo = await nextD1Sequence(env.DB, now.date); const result = await insertD1Order(env.DB, input, now.date, sequenceNo); return json({ ok: true, ...result });
   } catch (error) {
