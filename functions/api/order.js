@@ -243,13 +243,15 @@ async function onRequestPostD1({ request, env }) {
   const orderType = clean(raw.orderType, 20) || (singleKey ? 'single' : 'package');
   const input = { orderType, singleKey, singleDishes: clean(raw.singleDishes, 1000), packageName: clean(raw.packageName, 40), mealPeriod: clean(raw.mealPeriod, 20), mainMeat: clean(raw.mainMeat, 500), sideMeat: clean(raw.sideMeat, 500), name: clean(raw.name, 60), phone: clean(raw.phone, 30), price: Number(raw.price) };
   if (!input.packageName || !input.mealPeriod || !Number.isFinite(input.price) || !input.name || !/^1[3-9]\d{9}$/.test(input.phone)) return json({ ok: false, error: '订单信息不完整或格式不正确' }, 400);
+  let diagnosticSchedule = null; let diagnosticNow = null;
   try {
-    await ensureD1(env.DB); await cleanupD1OldData(env.DB); const config = await readD1Config(env.DB); const now = beijingNow();
-    const schedule = d1Schedule(config); assertD1MealOpen(schedule, input.mealPeriod, now.minutes);
+    await ensureD1(env.DB); await cleanupD1OldData(env.DB); const config = await readD1Config(env.DB); const now = beijingNow(); diagnosticNow = now;
+    const schedule = d1Schedule(config); diagnosticSchedule = schedule; assertD1MealOpen(schedule, input.mealPeriod, now.minutes);
     validateD1Order(input, config); const sequenceNo = await nextD1Sequence(env.DB, now.date); const result = await insertD1Order(env.DB, input, now.date, sequenceNo); return json({ ok: true, ...result });
   } catch (error) {
     console.error('D1 order submit failed', error);
-    return json({ ok: false, error: error.message || '订单提交失败' }, error.status || 502);
+    const debug = new URL(request.url).searchParams.get('debug') === '1' ? { diagnosticNow, diagnosticSchedule, inputMealPeriod: input.mealPeriod } : {};
+    return json({ ok: false, error: error.message || '订单提交失败', ...debug }, error.status || 502);
   }
 }
 
