@@ -1,6 +1,6 @@
 /** Cloudflare Pages order endpoint. */
 import { seaTableRequest } from './_seatable.js';
-import { d1Enabled, ensureD1, cleanupD1OldData, readD1Config, d1Schedule, assertD1MealOpen, validateD1Order, nextD1Sequence, peekD1Sequence, insertD1Order } from './_d1.js';
+import { d1Enabled, ensureD1, cleanupD1OldData, readD1Config, d1Schedule, assertD1MealOpen, validateD1Order, nextD1Sequence, insertD1Order } from './_d1.js';
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -186,20 +186,6 @@ async function nextDailySequence(env, tableName, map, today) {
   return max + 1;
 }
 
-async function peekDailySequence(env, tableName, map, today) {
-  const data = await seaTableFetch(env, tableName, 'GET');
-  let max = 0;
-  rowsFromResponse(data).forEach((row) => {
-    if (dateOnly(valueFrom(row, map, 'orderDate', ['日期'])) !== today) return;
-    const explicit = Number(valueFrom(row, map, 'sequenceNo', ['序号', '订单序号']));
-    const orderNo = String(valueFrom(row, map, 'orderNo', ['订单号']));
-    const suffix = Number(orderNo.match(/-(\d{4})$/)?.[1] || 0);
-    const sequence = Number.isFinite(explicit) && explicit > 0 ? explicit : suffix;
-    if (sequence > max) max = sequence;
-  });
-  return max + 1;
-}
-
 function buildOrderRow(input, map, orderNo, orderDate, sequenceNo) {
   return {
     [columnName(map, 'orderNo')]: orderNo, [columnName(map, 'orderDate')]: orderDate,
@@ -243,15 +229,13 @@ async function onRequestPostD1({ request, env }) {
   const orderType = clean(raw.orderType, 20) || (singleKey ? 'single' : 'package');
   const input = { orderType, singleKey, singleDishes: clean(raw.singleDishes, 1000), packageName: clean(raw.packageName, 40), mealPeriod: clean(raw.mealPeriod, 20), mainMeat: clean(raw.mainMeat, 500), sideMeat: clean(raw.sideMeat, 500), name: clean(raw.name, 60), phone: clean(raw.phone, 30), price: Number(raw.price) };
   if (!input.packageName || !input.mealPeriod || !Number.isFinite(input.price) || !input.name || !/^1[3-9]\d{9}$/.test(input.phone)) return json({ ok: false, error: '订单信息不完整或格式不正确' }, 400);
-  let diagnosticSchedule = null; let diagnosticNow = null;
   try {
-    await ensureD1(env.DB); await cleanupD1OldData(env.DB); const config = await readD1Config(env.DB); const now = beijingNow(); diagnosticNow = now;
-    const schedule = d1Schedule(config); diagnosticSchedule = schedule; assertD1MealOpen(schedule, input.mealPeriod, now.minutes);
+    await ensureD1(env.DB); await cleanupD1OldData(env.DB); const config = await readD1Config(env.DB); const now = beijingNow();
+    assertD1MealOpen(d1Schedule(config), input.mealPeriod, now.minutes);
     validateD1Order(input, config); const sequenceNo = await nextD1Sequence(env.DB, now.date); const result = await insertD1Order(env.DB, input, now.date, sequenceNo); return json({ ok: true, ...result });
   } catch (error) {
     console.error('D1 order submit failed', error);
-    const debug = new URL(request.url).searchParams.get('debug') === '1' ? { diagnosticNow, diagnosticSchedule, inputMealPeriod: input.mealPeriod } : {};
-    return json({ ok: false, error: error.message || '订单提交失败', ...debug }, error.status || 502);
+    return json({ ok: false, error: error.message || '订单提交失败' }, error.status || 502);
   }
 }
 
@@ -290,26 +274,12 @@ export async function onRequestPost({ request, env }) {
 export async function onRequest(context) {
   if (d1Enabled(context.env)) {
     if (context.request.method === 'GET') {
-      if (new URL(context.request.url).searchParams.get('preview') === '1') { try { await ensureD1(context.env.DB); const now = beijingNow(); const sequenceNo = await peekD1Sequence(context.env.DB, now.date); return json({ ok: true, orderNo: String(sequenceNo), sequenceNo, orderDate: now.date, provisional: true }); } catch (error) { return json({ ok: false, error: error.message || '无法获取当前取餐号' }, 502); } }
       return json({ ok: true, service: 'order', configured: true, storage: 'd1' });
     }
     if (context.request.method !== 'POST') return json({ ok: false, error: 'Method Not Allowed' }, 405);
     return onRequestPostD1(context);
   }
   if (context.request.method === 'GET') {
-    if (new URL(context.request.url).searchParams.get('preview') === '1') {
-      try {
-        const orderMap = parseMap(context.env.SEATABLE_COLUMN_MAP, 'SEATABLE_COLUMN_MAP');
-        const tableName = clean(context.env.SEATABLE_TABLE_NAME, 100);
-        if (!tableName) throw new Error('请配置订单表名称');
-        const now = beijingNow();
-        const sequenceNo = await peekDailySequence(context.env, tableName, orderMap, now.date);
-        // 生成订单阶段只展示当天取餐序号，正式提交时再由服务端生成最终订单号。
-        return json({ ok: true, orderNo: String(sequenceNo), sequenceNo, orderDate: now.date, provisional: true });
-      } catch (error) {
-        return json({ ok: false, error: error.message || '无法获取当前订单号' }, 502);
-      }
-    }
     const configured = Boolean(clean(context.env?.SEATABLE_BASE_UUID) && clean(context.env?.SEATABLE_BASE_TOKEN) && clean(context.env?.SEATABLE_TABLE_NAME) && clean(context.env?.SEATABLE_STATS_TABLE_NAME));
     return json({ ok: true, service: 'order', configured });
   }

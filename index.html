@@ -244,7 +244,7 @@
   </div>
 
   <script>
-    const state = { orderMode: 'package', packageKey: 'A', singleKey: '', mealPeriod: '', main: new Set(), side: new Set(), orderNo: '', draftPayload: null, isSubmitting: false, isLoadingPreview: false, submitted: false };
+    const state = { orderMode: 'package', packageKey: 'A', singleKey: '', mealPeriod: '', main: new Set(), side: new Set(), draftPayload: null, isSubmitting: false, submitted: false };
     const $ = (id) => document.getElementById(id);
 
     function escapeHtml(value) {
@@ -491,7 +491,7 @@
         const valid = Boolean(currentMeal()) && Boolean(single) && contact.valid;
         $('validation').className = `validation ${valid ? 'ok' : 'warn'}`;
         $('validation').textContent = !currentMeal() ? '当前不在开放点餐时间' : (!single ? '当前时段暂无可用单品' : (contact.valid ? '单品已选择，可以提交' : '请先补充联系信息'));
-        $('submitBtn').disabled = !valid || isClosed() || state.isSubmitting || state.isLoadingPreview || state.submitted || Boolean(state.draftPayload);
+        $('submitBtn').disabled = !valid || isClosed() || state.isSubmitting || state.submitted || Boolean(state.draftPayload);
         $('submitBtn').style.display = state.draftPayload ? 'none' : 'block'; $('confirmBtn').style.display = state.draftPayload ? 'block' : 'none';
         $('summaryName').textContent = single ? single.name : '暂无可用单品'; $('price').textContent = single ? `¥${Number(single.price).toFixed(0)}` : '¥0';
         return;
@@ -518,7 +518,7 @@
       const valid = Boolean(currentMeal()) && state.main.size === pkg.mainCount && state.side.size === pkg.sideCount && contact.valid;
       $('validation').className = `validation ${valid ? 'ok' : 'warn'}`;
       $('validation').textContent = !currentMeal() ? '当前不在开放点餐时间' : (pkg.mainCount === 0 && pkg.sideCount === 0 ? (contact.valid ? '每日固定餐，无需选择菜品' : '请先补充联系信息') : (state.main.size !== pkg.mainCount || state.side.size !== pkg.sideCount ? `${mainText}；${sideText}` : (contact.valid ? '选择数量正确，可以提交' : '请先补充联系信息')));
-      $('submitBtn').disabled = !valid || isClosed() || state.isSubmitting || state.isLoadingPreview || state.submitted || Boolean(state.draftPayload);
+      $('submitBtn').disabled = !valid || isClosed() || state.isSubmitting || state.submitted || Boolean(state.draftPayload);
       $('submitBtn').style.display = state.draftPayload ? 'none' : 'block';
       $('confirmBtn').style.display = state.draftPayload ? 'block' : 'none';
       $('summaryName').textContent = pkg.name;
@@ -556,32 +556,10 @@
       updateStatus();
     }
 
-    function localPreviewOrderNo() {
-      const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
-      const get = (type) => parts.find((part) => part.type === type)?.value || '';
-      const dateKey = `${get('year')}-${get('month')}-${get('day')}`;
-      const storageKey = `${CONFIG.customerStorageKey}_preview_sequence_${dateKey}`;
-      try {
-        const next = Number(localStorage.getItem(storageKey) || '0') + 1;
-        localStorage.setItem(storageKey, String(next));
-        return String(next);
-      } catch (_) {
-        return '1';
-      }
-    }
-
-    async function previewOrderNo() {
-      // 这里的号码只用于“生成订单”预览，正式提交时仍由服务端分配
-      // 唯一序号。直接使用本机当天计数，避免顾客在生成订单阶段再等待
-      // 一次 SeaTable 读取；成功弹窗会显示最终服务器序号。
-      return localPreviewOrderNo();
-    }
-
     function showSuccess(orderNo, sequenceNo) {
       $('modalOrderNo').textContent = orderNo;
       $('modalTitle').textContent = '订单提交成功';
       $('modalMessage').innerHTML = `订单已写入系统。<br>当天取餐号：<span class="pickup-number">${escapeHtml(sequenceNo || '—')}</span>`;
-      state.orderNo = orderNo;
       $('successModal').classList.add('show');
     }
 
@@ -624,7 +602,6 @@
     function startAnotherOrder() {
       $('successModal').classList.remove('show');
       state.submitted = false;
-      state.orderNo = '';
       state.draftPayload = null;
       state.main.clear();
       state.side.clear();
@@ -634,18 +611,18 @@
       $('orderCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    function buildOrderPayload(orderNo) {
+    function buildOrderPayload() {
       if (state.orderMode === 'single') {
         const single = currentSingle();
         return {
-          orderNo, orderType: 'single', singleKey: single?.key || '', singleDishes: (single?.dishes || []).join('、'),
+          orderType: 'single', singleKey: single?.key || '', singleDishes: (single?.dishes || []).join('、'),
           packageName: single?.name || '', price: Number(single?.price || 0), mealPeriod: state.mealPeriod,
           mainMeat: '', sideMeat: '', name: $('customerName').value.trim(), phone: normalizePhone($('customerPhone').value)
         };
       }
       const pkg = currentPackage();
       return {
-        orderNo, orderType: 'package', singleKey: '', singleDishes: '',
+        orderType: 'package', singleKey: '', singleDishes: '',
         packageName: pkg.name,
         price: Number(pkg.price),
         mealPeriod: state.mealPeriod,
@@ -755,25 +732,12 @@
         alert('当前不在开放时段，或套餐菜品数量、联系人信息不符合要求');
         return;
       }
-      state.isLoadingPreview = true;
-      $('submitBtn').textContent = '正在生成订单…';
+      // The real pickup number is allocated atomically by the server only
+      // after the customer confirms submission. There is no preview request.
+      const payload = buildOrderPayload();
+      state.draftPayload = payload;
+      showDraft(payload);
       updateStatus();
-      try {
-        // The real pickup number is allocated atomically by the server only
-        // after the customer confirms submission. Do not request or display a
-        // provisional number here: it could be stale when several customers
-        // are ordering at the same time.
-        const payload = buildOrderPayload('');
-        state.draftPayload = payload;
-        showDraft(payload);
-        updateStatus();
-      } catch (error) {
-        alert(`无法获取当前订单号：${error.message || '请稍后重试'}`);
-      } finally {
-        state.isLoadingPreview = false;
-        $('submitBtn').textContent = '生成订单';
-        updateStatus();
-      }
     });
 
     $('confirmBtn').addEventListener('click', async () => {
@@ -795,8 +759,8 @@
         state.submitted = true;
         state.draftPayload = null;
         $('draftPanel').classList.remove('show');
-        saveOrderHistory({ ...payload, orderNo: result.orderNo || payload.orderNo, sequenceNo: result.sequenceNo, orderDate: result.orderDate || new Date().toLocaleDateString('en-CA'), submittedAt: new Date().toISOString() });
-        showSuccess(result.orderNo || payload.orderNo, result.sequenceNo);
+        saveOrderHistory({ ...payload, orderNo: result.orderNo, sequenceNo: result.sequenceNo, orderDate: result.orderDate || new Date().toLocaleDateString('en-CA'), submittedAt: new Date().toISOString() });
+        showSuccess(result.orderNo, result.sequenceNo);
       } catch (error) {
         alert(`订单提交失败：${error.message || '请检查网络或联系管理员'}`);
       } finally {
