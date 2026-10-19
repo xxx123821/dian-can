@@ -274,6 +274,11 @@ export async function onRequestPost({ request, env }) {
 export async function onRequest(context) {
   if (d1Enabled(context.env)) {
     if (context.request.method === 'GET') {
+      if (new URL(context.request.url).searchParams.get('checkSchedule') === '1') {
+        await ensureD1(context.env.DB);
+        const config = await readD1Config(context.env.DB);
+        return json({ ok: true, service: 'order', storage: 'd1', schedule: d1Schedule(config), now: beijingNow() });
+      }
       return json({ ok: true, service: 'order', configured: true, storage: 'd1' });
     }
     if (context.request.method !== 'POST') return json({ ok: false, error: 'Method Not Allowed' }, 405);
