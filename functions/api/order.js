@@ -245,7 +245,10 @@ async function onRequestPostD1({ request, env }) {
   }
 }
 
-export async function onRequestPost({ request, env }) {
+// SeaTable fallback handler. Keep this private: exporting an onRequestPost
+// method makes Pages bypass the universal dispatcher below, which would send
+// POST requests to the legacy SeaTable path even when D1 is configured.
+async function onRequestPostSeaTable({ request, env }) {
   let raw;
   try { raw = await request.json(); } catch (_) { return json({ ok: false, error: '请求格式错误' }, 400); }
   const input = {
@@ -298,5 +301,5 @@ export async function onRequest(context) {
     return json({ ok: true, service: 'order', configured });
   }
   if (context.request.method !== 'POST') return json({ ok: false, error: 'Method Not Allowed' }, 405);
-  return onRequestPost(context);
+  return onRequestPostSeaTable(context);
 }
