@@ -124,9 +124,46 @@ export async function saveD1Menu(db, payload) {
 }
 export async function saveD1Settings(db, settings) { return saveD1Menu(db, { packages: [], dishes: [], settings }); }
 
-function clockMinutes(value) { const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/); if (!match) return NaN; return Number(match[1]) * 60 + Number(match[2]); }
-export function d1Schedule(config) { const settings = {}; (config.settings || []).forEach((row) => { settings[row.key] = clean(row.value); }); return { lunch: { label: '午餐', start: settings.lunchStart || '00:00', end: settings.lunchEnd || '23:59' }, dinner: { label: '晚餐', start: settings.dinnerStart || '00:00', end: settings.dinnerEnd || '23:59' } }; }
-export function assertD1MealOpen(schedule, period, minutes) { const item = schedule[period]; const start = clockMinutes(item?.start); const end = clockMinutes(item?.end); if (!item || !Number.isFinite(start) || !Number.isFinite(end) || minutes < start || minutes >= end) throw Object.assign(new Error(`${item?.label || period}当前未开放，无法提交`), { status: 400 }); }
+function clockMinutes(value) {
+  // Admin input is normally HH:MM, but accepting a full-width colon and
+  // surrounding whitespace keeps old saved settings from making all orders
+  // fail validation after a migration.
+  const match = String(value ?? '').trim().replace('：', ':').match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return NaN;
+  const hour = Number(match[1]); const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return NaN;
+  return hour * 60 + minute;
+}
+function mealKey(value) {
+  const key = clean(value, 20).toLowerCase();
+  return key === '午餐' || key === 'lunch' ? 'lunch' : (key === '晚餐' || key === 'dinner' ? 'dinner' : key);
+}
+export function d1Schedule(config) {
+  const settings = {};
+  (config.settings || []).forEach((row) => {
+    const key = clean(row.key, 80);
+    const value = clean(row.value);
+    if (key) settings[key] = value;
+  });
+  // Support settings written by early Chinese-column versions as well as the
+  // current English keys used by the D1 admin page.
+  const read = (key, ...aliases) => settings[key] || aliases.map((alias) => settings[alias]).find(Boolean) || '';
+  return {
+    lunch: { label: '午餐', start: read('lunchStart', '午餐开始', '午餐开始时间') || '00:00', end: read('lunchEnd', '午餐截止', '午餐截止时间') || '23:59' },
+    dinner: { label: '晚餐', start: read('dinnerStart', '晚餐开始', '晚餐开始时间') || '00:00', end: read('dinnerEnd', '晚餐截止', '晚餐截止时间') || '23:59' }
+  };
+}
+export function assertD1MealOpen(schedule, period, minutes) {
+  const key = mealKey(period);
+  const item = schedule[key] || schedule[period];
+  const start = clockMinutes(item?.start); const end = clockMinutes(item?.end);
+  // A schedule ending at 23:59 means the whole Beijing calendar day. Treat
+  // the displayed final minute as open too, avoiding an accidental rejection
+  // caused by differing second-level clocks around midnight.
+  const open = Number.isFinite(minutes) && Number.isFinite(start) && Number.isFinite(end)
+    && (start <= end ? (minutes >= start && (end === 1439 ? minutes <= end : minutes < end)) : (minutes >= start || minutes < end));
+  if (!item || !open) throw Object.assign(new Error(`${item?.label || period}当前未开放，无法提交`), { status: 400 });
+}
 export function validateD1Order(input, config) {
   const menu = publicMenu(config).mealMenus?.[input.mealPeriod];
   if (input.orderType === 'single') {
