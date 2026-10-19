@@ -283,7 +283,10 @@ export async function onRequest(context) {
       if (new URL(context.request.url).searchParams.get('checkSchedule') === '1') {
         await ensureD1(context.env.DB);
         const config = await readD1Config(context.env.DB);
-        return json({ ok: true, service: 'order', storage: 'd1', schedule: d1Schedule(config), now: beijingNow() });
+        const schedule = d1Schedule(config); const now = beijingNow();
+        const allowed = {};
+        for (const period of ['lunch', 'dinner']) { try { assertD1MealOpen(schedule, period, now.minutes); allowed[period] = true; } catch (error) { allowed[period] = error.message; } }
+        return json({ ok: true, service: 'order', storage: 'd1', schedule, now, allowed });
       }
       return json({ ok: true, service: 'order', configured: true, storage: 'd1' });
     }
